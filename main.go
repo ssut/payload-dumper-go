@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 )
 
 func extractPayloadBin(filename string) string {
@@ -65,6 +66,15 @@ func main() {
 		log.Fatal(err)
 	}
 	payload.Init()
+
+	now := time.Now()
+	targetDirectory := fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
+	if err := os.Mkdir(targetDirectory, 0755); err != nil {
+		log.Fatal("Failed to create target directory")
+	}
+	if err := payload.ExtractAll(targetDirectory); err != nil {
+		log.Fatal(err)
+	}
 }
 
 func usage() {
