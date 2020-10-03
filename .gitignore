@@ -34,3 +34,7 @@
 
 *.zip
 **/payload.bin
+
+extracted_*/
+
+.DS_Store
