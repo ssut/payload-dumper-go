@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"compress/bzip2"
 	"crypto/sha256"
 	"encoding/binary"
@@ -198,55 +197,48 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			return fmt.Errorf("Invalid operation.DstExtents for the partition %s", name)
 		}
 		e := operation.DstExtents[0]
-		data, err := p.readDataBlob(int64(operation.GetDataOffset()), int64(operation.GetDataLength()))
-		if err != nil {
-			return err
-		}
-		_, err = out.Seek(int64(e.GetStartBlock())*blockSize, 0)
+		dataOffset := p.dataOffset + int64(operation.GetDataOffset())
+		dataLength := int64(operation.GetDataLength())
+		_, err := out.Seek(int64(e.GetStartBlock())*blockSize, 0)
 		if err != nil {
 			return err
 		}
 		expectedUncompressedBlockSize := int64(e.GetNumBlocks() * blockSize)
-		// fmt.Println(e.GetNumBlocks(), blockSize)
 
-		buf := bytes.NewBuffer(data)
 		bufSha := sha256.New()
-		bufSha.Write(data)
-		hash := hex.EncodeToString(bufSha.Sum(nil))
-		expectedHash := hex.EncodeToString(operation.GetDataSha256Hash())
-		if hash != expectedHash {
-			return fmt.Errorf("Verify failed (Checksum mismatch): %s (%s != %s)", name, hash, expectedHash)
-		}
+		teeReader := io.TeeReader(io.NewSectionReader(p.file, dataOffset, dataLength), bufSha)
 
 		switch operation.GetType() {
 		case chromeos_update_engine.InstallOperation_REPLACE:
-			n, err := out.Write(data)
+			fmt.Println("REPLACE")
+			n, err := io.CopyN(out, teeReader, dataLength)
 			if err != nil {
 				return err
 			}
+
 			if int64(n) != expectedUncompressedBlockSize {
 				return fmt.Errorf("Verify failed (Unexpected bytes written): %s (%d != %d)", name, n, expectedUncompressedBlockSize)
 			}
 			break
 
 		case chromeos_update_engine.InstallOperation_REPLACE_XZ:
-			reader := xz.NewDecompressionReader(buf)
+			fmt.Println("REPLACE_XZ")
+			reader := xz.NewDecompressionReader(teeReader)
 			if err != nil {
 				return err
 			}
 
-			n, err := io.Copy(out, &reader)
+			fmt.Println(dataLength)
+			_, err := io.Copy(out, &reader)
 			if err != nil {
 				return err
-			}
-			if n != expectedUncompressedBlockSize {
-				return fmt.Errorf("Verify failed (Unexpected bytes written): %s (%d != %d)", name, n, expectedUncompressedBlockSize)
 			}
 
 			break
 
 		case chromeos_update_engine.InstallOperation_REPLACE_BZ:
-			reader := bzip2.NewReader(buf)
+			fmt.Println("REPLACE_BZ")
+			reader := bzip2.NewReader(teeReader)
 			n, err := io.Copy(out, reader)
 			if err != nil {
 				return err
@@ -260,6 +252,12 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			return fmt.Errorf("Unhandled operation type: %s", operation.GetType().String())
 		}
 
+		// verify hash
+		hash := hex.EncodeToString(bufSha.Sum(nil))
+		expectedHash := hex.EncodeToString(operation.GetDataSha256Hash())
+		if hash != expectedHash {
+			return fmt.Errorf("Verify failed (Checksum mismatch): %s (%s != %s)", name, hash, expectedHash)
+		}
 	}
 
 	return nil
