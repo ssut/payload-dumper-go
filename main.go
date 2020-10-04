@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -45,6 +46,7 @@ func extractPayloadBin(filename string) string {
 }
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	filename := os.Args[1]
 
 	if _, err := os.Stat(filename); os.IsNotExist(err) {

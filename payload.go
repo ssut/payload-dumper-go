@@ -9,12 +9,20 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	humanize "github.com/dustin/go-humanize"
 	"github.com/golang/protobuf/proto"
 	xz "github.com/spencercw/go-xz"
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
+	"github.com/vbauerster/mpb/v5"
+	"github.com/vbauerster/mpb/v5/decor"
 )
+
+type request struct {
+	partition       *chromeos_update_engine.PartitionUpdate
+	targetDirectory string
+}
 
 // Payload is a new format for the Android OTA/Firmware update files since Android Oreo
 type Payload struct {
@@ -28,6 +36,10 @@ type Payload struct {
 	metadataSize int64
 	dataOffset   int64
 	initialized  bool
+
+	requests chan *request
+	workerWG sync.WaitGroup
+	progress *mpb.Progress
 }
 
 const payloadHeaderMagic = "CrAU"
@@ -192,10 +204,26 @@ func (p *Payload) readDataBlob(offset int64, length int64) ([]byte, error) {
 
 func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out *os.File) error {
 	name := partition.GetPartitionName()
+	info := partition.GetNewPartitionInfo()
+	totalOperations := len(partition.Operations)
+	barName := fmt.Sprintf("%s (%s)", name, humanize.Bytes(info.GetSize()))
+	bar := p.progress.AddBar(
+		int64(totalOperations),
+		mpb.PrependDecorators(
+			decor.Name(barName, decor.WCSyncSpaceR),
+		),
+		mpb.AppendDecorators(
+			decor.Percentage(),
+		),
+	)
+	defer bar.SetTotal(0, true)
+
 	for _, operation := range partition.Operations {
 		if len(operation.DstExtents) == 0 {
 			return fmt.Errorf("Invalid operation.DstExtents for the partition %s", name)
 		}
+		bar.Increment()
+
 		e := operation.DstExtents[0]
 		dataOffset := p.dataOffset + int64(operation.GetDataOffset())
 		dataLength := int64(operation.GetDataLength())
@@ -210,7 +238,6 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 
 		switch operation.GetType() {
 		case chromeos_update_engine.InstallOperation_REPLACE:
-			fmt.Println("REPLACE")
 			n, err := io.Copy(out, teeReader)
 			if err != nil {
 				return err
@@ -222,13 +249,11 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			break
 
 		case chromeos_update_engine.InstallOperation_REPLACE_XZ:
-			fmt.Println("REPLACE_XZ")
 			reader := xz.NewDecompressionReader(teeReader)
 			if err != nil {
 				return err
 			}
 
-			fmt.Println(dataLength)
 			_, err := io.Copy(out, &reader)
 			if err != nil {
 				return err
@@ -237,7 +262,6 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			break
 
 		case chromeos_update_engine.InstallOperation_REPLACE_BZ:
-			fmt.Println("REPLACE_BZ")
 			reader := bzip2.NewReader(teeReader)
 			n, err := io.Copy(out, reader)
 			if err != nil {
@@ -263,31 +287,48 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 	return nil
 }
 
+func (p *Payload) worker() {
+	for req := range p.requests {
+		partition := req.partition
+		targetDirectory := req.targetDirectory
+
+		name := fmt.Sprintf("%s.img", partition.GetPartitionName())
+		filepath := fmt.Sprintf("%s/%s", targetDirectory, name)
+		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0755)
+		if err != nil {
+		}
+		if err := p.Extract(partition, file); err != nil {
+		}
+
+		p.workerWG.Done()
+	}
+}
+
+func (p *Payload) spawnExtractWorkers(n int) {
+	for i := 0; i < n; i++ {
+		go p.worker()
+	}
+}
+
 func (p *Payload) ExtractAll(targetDirectory string) error {
 	if !p.initialized {
 		return errors.New("Payload has not been initialized")
 	}
+	p.progress = mpb.New()
 
-	total := len(p.deltaArchiveManifest.Partitions)
-	for i, partition := range p.deltaArchiveManifest.Partitions {
-		info := partition.GetNewPartitionInfo()
-		name := fmt.Sprintf("%s.img", partition.GetPartitionName())
+	p.requests = make(chan *request, 100)
+	p.spawnExtractWorkers(4)
 
-		fmt.Printf("[%02d/%02d] Extracting: %s\n", i+1, total, fmt.Sprintf("%s (%s)", name, humanize.Bytes(*info.Size)))
-
-		filepath := fmt.Sprintf("%s/%s", targetDirectory, name)
-		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0755)
-		if err != nil {
-			file.Close()
-			return err
+	for _, partition := range p.deltaArchiveManifest.Partitions {
+		p.workerWG.Add(1)
+		p.requests <- &request{
+			partition:       partition,
+			targetDirectory: targetDirectory,
 		}
-		if err := p.Extract(partition, file); err != nil {
-			file.Close()
-			return err
-		}
-		file.Close()
-
 	}
+
+	p.workerWG.Wait()
+	close(p.requests)
 
 	return nil
 }
