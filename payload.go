@@ -211,7 +211,7 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 		switch operation.GetType() {
 		case chromeos_update_engine.InstallOperation_REPLACE:
 			fmt.Println("REPLACE")
-			n, err := io.CopyN(out, teeReader, dataLength)
+			n, err := io.Copy(out, teeReader)
 			if err != nil {
 				return err
 			}
