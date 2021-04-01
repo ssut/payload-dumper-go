@@ -47,6 +47,9 @@ func extractPayloadBin(filename string) string {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
+	if len(os.Args) < 2 {
+		usage()
+	}
 	filename := os.Args[1]
 
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
