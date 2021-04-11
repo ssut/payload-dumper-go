@@ -258,6 +258,7 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			if err != nil {
 				return err
 			}
+			reader.Close()
 
 			break
 
