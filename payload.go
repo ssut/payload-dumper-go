@@ -250,11 +250,14 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 
 		case chromeos_update_engine.InstallOperation_REPLACE_XZ:
 			reader := xz.NewDecompressionReader(teeReader)
-			_, err := io.Copy(out, &reader)
+			n, err := io.Copy(out, &reader)
 			if err != nil {
 				return err
 			}
 			reader.Close()
+			if n != expectedUncompressedBlockSize {
+				return fmt.Errorf("Verify failed (Unexpected bytes written): %s (%d != %d)", name, n, expectedUncompressedBlockSize)
+			}
 
 			break
 
