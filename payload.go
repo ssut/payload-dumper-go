@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"sync"
 
 	humanize "github.com/dustin/go-humanize"
@@ -310,7 +311,7 @@ func (p *Payload) spawnExtractWorkers(n int) {
 	}
 }
 
-func (p *Payload) ExtractAll(targetDirectory string) error {
+func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) error {
 	if !p.initialized {
 		return errors.New("Payload has not been initialized")
 	}
@@ -319,7 +320,16 @@ func (p *Payload) ExtractAll(targetDirectory string) error {
 	p.requests = make(chan *request, 100)
 	p.spawnExtractWorkers(4)
 
+	sort.Strings(partitions)
+
 	for _, partition := range p.deltaArchiveManifest.Partitions {
+		if len(partitions) > 0 {
+			idx := sort.SearchStrings(partitions, *partition.PartitionName)
+			if idx == len(partitions) || partitions[idx] != *partition.PartitionName {
+				continue
+			}
+		}
+
 		p.workerWG.Add(1)
 		p.requests <- &request{
 			partition:       partition,
@@ -331,4 +341,8 @@ func (p *Payload) ExtractAll(targetDirectory string) error {
 	close(p.requests)
 
 	return nil
+}
+
+func (p *Payload) ExtractAll(targetDirectory string) error {
+	return p.ExtractSelected(targetDirectory, nil)
 }

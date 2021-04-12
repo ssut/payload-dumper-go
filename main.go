@@ -47,10 +47,15 @@ func extractPayloadBin(filename string) string {
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	if len(os.Args) < 2 {
+
+	list := flag.Bool("l", false, "Show list of partitions in payload.bin")
+	partitions := flag.String("p", "", "Dump only selected partitions")
+	flag.Parse()
+
+	if flag.NArg() == 0 {
 		usage()
 	}
-	filename := os.Args[1]
+	filename := flag.Arg(0)
 
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		log.Fatalf("File does not exist: %s\n", filename)
@@ -72,13 +77,23 @@ func main() {
 	}
 	payload.Init()
 
+	if *list {
+		return
+	}
+
 	now := time.Now()
 	targetDirectory := fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
 	if err := os.Mkdir(targetDirectory, 0755); err != nil {
 		log.Fatal("Failed to create target directory")
 	}
-	if err := payload.ExtractAll(targetDirectory); err != nil {
-		log.Fatal(err)
+	if *partitions != "" {
+		if err := payload.ExtractSelected(targetDirectory, strings.Split(*partitions, ",")); err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		if err := payload.ExtractAll(targetDirectory); err != nil {
+			log.Fatal(err)
+		}
 	}
 }
 
