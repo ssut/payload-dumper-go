@@ -67,6 +67,8 @@ func main() {
 		payloadBin = extractPayloadBin(filename)
 		if payloadBin == "" {
 			log.Fatal("Failed to extract payload.bin from the archive.")
+		} else {
+			defer os.Remove(payloadBin)
 		}
 	}
 	fmt.Printf("payload.bin: %s\n", payloadBin)
