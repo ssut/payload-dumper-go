@@ -35,3 +35,15 @@ builds:
       - amd64
     ldflags:
       - '-extldflags "-static -s -w"'
+  - id: build-linux-arm64
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-c++
+      - CGO_CFLAGS=-I/linux-aarch64-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/linux-aarch64-buildroot/sys-root/lib
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - '-extldflags "-static -s -w"'

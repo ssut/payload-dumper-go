@@ -14,6 +14,26 @@ jobs:
       - name: Install dependencies
         run: dnf -y install git golang mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
 
+      - name: Setup cross compile environment for Linux AArch64
+        env:
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-c++
+        run: |
+          dnf -y install 'dnf-command(copr)'
+          dnf -y copr enable lantw44/aarch64-linux-gnu-toolchain
+          dnf -y install aarch64-linux-gnu-{binutils,gcc,glibc}
+          dnf -y install autoconf gettext-devel libtool po4a wget
+          mkdir /linux-aarch64-buildroot
+          pushd /linux-aarch64-buildroot
+          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
+          tar -xvf xz-5.2.5.tar.gz
+          pushd xz-5.2.5
+          ./autogen.sh
+          ./configure --host=aarch64 --prefix=/linux-aarch64-buildroot/sys-root
+          make -j$(nproc) install
+          popd
+          popd
+
       - uses: actions/checkout@v2
 
       - uses: goreleaser/goreleaser-action@v2
