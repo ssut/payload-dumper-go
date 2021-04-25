@@ -35,6 +35,20 @@ builds:
       - amd64
     ldflags:
       - '-extldflags "-static -s -w"'
+  - id: build-linux-armv7
+    env:
+      - CC=arm-linux-gnueabihf-gcc
+      - CXX=arm-linux-gnueabihf-c++
+      - CGO_CFLAGS=-I/linux-armv7-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/linux-armv7-buildroot/sys-root/lib
+    goos:
+      - linux
+    goarch:
+      - arm
+    goarm:
+      - 7
+    ldflags:
+      - '-extldflags "-static -s -w"'
   - id: build-linux-arm64
     env:
       - CC=aarch64-linux-gnu-gcc
