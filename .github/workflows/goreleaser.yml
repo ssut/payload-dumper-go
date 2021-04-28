@@ -36,7 +36,12 @@ jobs:
 
     steps:
       - name: Install dependencies
-        run: dnf -y install git golang mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
+        run: |
+          dnf -y install autoconf gettext-devel git golang libtool po4a mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
+          dnf -y install 'dnf-command(download)'
+          dnf download --source xz-devel
+          rpm -ivh *.src.rpm
+          rm -f *.src.rpm
 
       - name: Setup cross compile environment for Linux ARMv7
         env:
@@ -44,15 +49,12 @@ jobs:
           CXX: arm-linux-gnueabihf-c++
           CFLAGS: -fPIC
         run: |
-          dnf -y install 'dnf-command(copr)'
           dnf -y copr enable lantw44/arm-linux-gnueabihf-toolchain
           dnf -y install arm-linux-gnueabihf-{binutils,gcc,glibc}
-          dnf -y install autoconf gettext-devel libtool po4a wget
           mkdir /linux-armv7-buildroot
           pushd /linux-armv7-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           ./autogen.sh
           ./configure --host=armv7 --prefix=/linux-armv7-buildroot/sys-root
           make -j$(nproc) install
@@ -68,9 +70,8 @@ jobs:
           dnf -y install aarch64-linux-gnu-{binutils,gcc,glibc}
           mkdir /linux-aarch64-buildroot
           pushd /linux-aarch64-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           ./autogen.sh
           ./configure --host=aarch64 --prefix=/linux-aarch64-buildroot/sys-root
           make -j$(nproc) install
@@ -112,9 +113,8 @@ jobs:
         run: |
           mkdir /darwin-amd64-buildroot
           pushd /darwin-amd64-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
           PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin20.2 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
@@ -128,9 +128,8 @@ jobs:
         run: |
           mkdir /darwin-aarch64-buildroot
           pushd /darwin-aarch64-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
           PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin20.2 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
