@@ -121,6 +121,22 @@ jobs:
           popd
           popd
 
+      - name: Setup cross compile environment for Darwin AArch64
+        env:
+          CC: oa64-clang
+          CXX: oa64-clang++
+        run: |
+          mkdir /darwin-aarch64-buildroot
+          pushd /darwin-aarch64-buildroot
+          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
+          tar -xvf xz-5.2.5.tar.gz
+          pushd xz-5.2.5
+          PATH=/osxcross/target/bin:$PATH ./autogen.sh
+          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin20.2 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
+          popd
+          popd
+
       - uses: actions/checkout@v2
 
       - uses: goreleaser/goreleaser-action@v2

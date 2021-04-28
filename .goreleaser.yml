@@ -72,3 +72,14 @@ builds:
       - darwin
     goarch:
       - amd64
+  - id: build-darwin-arm64
+    env:
+      - CC=oa64-clang
+      - CXX=oa64-clang++
+      - CGO_CFLAGS=-I/darwin-aarch64-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/darwin-aarch64-buildroot/sys-root/lib
+      - PATH=/osxcross/target/bin:$PATH
+    goos:
+      - darwin
+    goarch:
+      - arm64
