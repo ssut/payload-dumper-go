@@ -1,0 +1,95 @@
+name: goreleaser
+
+on:
+  push:
+    tags:
+      - '*'
+
+jobs:
+  goreleaser:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+
+    steps:
+      - name: Install dependencies
+        run: dnf -y install git golang mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
+
+      - name: Setup cross compile environment for Linux ARMv7
+        env:
+          CC: arm-linux-gnueabihf-gcc
+          CXX: arm-linux-gnueabihf-c++
+          CFLAGS: -fPIC
+        run: |
+          dnf -y install 'dnf-command(copr)'
+          dnf -y copr enable lantw44/arm-linux-gnueabihf-toolchain
+          dnf -y install arm-linux-gnueabihf-{binutils,gcc,glibc}
+          dnf -y install autoconf gettext-devel libtool po4a wget
+          mkdir /linux-armv7-buildroot
+          pushd /linux-armv7-buildroot
+          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
+          tar -xvf xz-5.2.5.tar.gz
+          pushd xz-5.2.5
+          ./autogen.sh
+          ./configure --host=armv7 --prefix=/linux-armv7-buildroot/sys-root
+          make -j$(nproc) install
+          popd
+          popd
+
+      - name: Setup cross compile environment for Linux AArch64
+        env:
+          CC: aarch64-linux-gnu-gcc
+          CXX: aarch64-linux-gnu-c++
+        run: |
+          dnf -y copr enable lantw44/aarch64-linux-gnu-toolchain
+          dnf -y install aarch64-linux-gnu-{binutils,gcc,glibc}
+          mkdir /linux-aarch64-buildroot
+          pushd /linux-aarch64-buildroot
+          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
+          tar -xvf xz-5.2.5.tar.gz
+          pushd xz-5.2.5
+          ./autogen.sh
+          ./configure --host=aarch64 --prefix=/linux-aarch64-buildroot/sys-root
+          make -j$(nproc) install
+          popd
+          popd
+
+      - id: osxcross-cache
+        uses: actions/cache@v2
+        with:
+          path: /osxcross
+          key: ${{ runner.os }}-osxcross
+
+      - name: Build osxcross
+        if: steps.osxcross-cache.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/tpoechtrager/osxcross /osxcross
+          pushd /osxcross
+          dnf -y install clang llvm-devel libxml2-devel libuuid-devel openssl-devel bash patch libstdc++-static make cmake
+          wget https://s3.dockerproject.org/darwin/v2/MacOSX10.11.sdk.tar.xz -O tarballs/MacOSX10.11.sdk.tar.xz
+          UNATTENDED=1 ./build.sh
+          popd
+
+      - name: Setup cross compile environment for Darwin AMD64
+        env:
+          CC: o64-clang
+          CXX: o64-clang++
+        run: |
+          mkdir /darwin-amd64-buildroot
+          pushd /darwin-amd64-buildroot
+          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
+          tar -xvf xz-5.2.5.tar.gz
+          pushd xz-5.2.5
+          PATH=/osxcross/target/bin:$PATH ./autogen.sh
+          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin15 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
+          popd
+          popd
+
+      - uses: actions/checkout@v2
+
+      - uses: goreleaser/goreleaser-action@v2
+        with:
+          version: latest
+          args: release --rm-dist
+        env:
+          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'

@@ -1,0 +1,73 @@
+env:
+  - CGO_ENABLED=1
+builds:
+  - id: build-windows-386
+    env:
+      - CC=i686-w64-mingw32-gcc
+      - CXX=i686-w64-mingw32-g++
+    goos:
+      - windows
+    goarch:
+      - 386
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-windows-amd64
+    env:
+      - CC=x86_64-w64-mingw32-gcc
+      - CXX=x86_64-w64-mingw32-g++
+    goos:
+      - windows
+    goarch:
+      - amd64
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-linux-386
+    goos:
+      - linux
+    goarch:
+      - 386
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-linux-amd64
+    goos:
+      - linux
+    goarch:
+      - amd64
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-linux-armv7
+    env:
+      - CC=arm-linux-gnueabihf-gcc
+      - CXX=arm-linux-gnueabihf-c++
+      - CGO_CFLAGS=-I/linux-armv7-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/linux-armv7-buildroot/sys-root/lib
+    goos:
+      - linux
+    goarch:
+      - arm
+    goarm:
+      - 7
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-linux-arm64
+    env:
+      - CC=aarch64-linux-gnu-gcc
+      - CXX=aarch64-linux-gnu-c++
+      - CGO_CFLAGS=-I/linux-aarch64-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/linux-aarch64-buildroot/sys-root/lib
+    goos:
+      - linux
+    goarch:
+      - arm64
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-darwin-amd64
+    env:
+      - CC=/osxcross/target/bin/o64-clang
+      - CXX=/osxcross/target/bin/o64-clang++
+      - CGO_CFLAGS=-I/darwin-amd64-buildroot/sys-root/include
+      - CGO_LDFLAGS=-L/darwin-amd64-buildroot/sys-root/lib
+    goos:
+      - darwin
+    goarch:
+      - amd64
