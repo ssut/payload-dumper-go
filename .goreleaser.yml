@@ -63,10 +63,11 @@ builds:
       - '-extldflags "-static -s -w"'
   - id: build-darwin-amd64
     env:
-      - CC=/osxcross/target/bin/o64-clang
-      - CXX=/osxcross/target/bin/o64-clang++
+      - CC=o64-clang
+      - CXX=o64-clang++
       - CGO_CFLAGS=-I/darwin-amd64-buildroot/sys-root/include
       - CGO_LDFLAGS=-L/darwin-amd64-buildroot/sys-root/lib
+      - PATH=/osxcross/target/bin:$PATH
     goos:
       - darwin
     goarch:
