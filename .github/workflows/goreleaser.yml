@@ -31,7 +31,7 @@ jobs:
 
   goreleaser:
     runs-on: ubuntu-latest
-    container: fedora:33
+    container: fedora:34
     needs: macos-sdk
 
     steps:
