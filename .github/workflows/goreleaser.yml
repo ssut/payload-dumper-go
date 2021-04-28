@@ -37,7 +37,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          dnf -y install autoconf gettext-devel git golang libtool po4a mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
+          dnf -y install autoconf bash clang cmake gettext-devel git glibc-{devel,static}.{i686,x86_64} golang libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
           dnf -y install 'dnf-command(download)'
           dnf download --source xz-devel
           rpm -ivh *.src.rpm
@@ -78,18 +78,17 @@ jobs:
           popd
           popd
 
-      - id: osxcross-cache
-        uses: actions/cache@v2
-        with:
-          path: /osxcross
-          key: ${{ runner.os }}-osxcross
-
       - name: Download osxcross
-        if: steps.osxcross-cache.outputs.cache-hit != 'true'
         run: git clone https://github.com/tpoechtrager/osxcross /osxcross
 
+      - id: osxcross-target
+        uses: actions/cache@v2
+        with:
+          path: /osxcross/target
+          key: ${{ runner.os }}-osxcross-target
+
       - uses: actions/download-artifact@master
-        if: steps.osxcross-cache.outputs.cache-hit != 'true'
+        if: steps.osxcross-target.outputs.cache-hit != 'true'
         with:
           name: osxcross-tarballs
           path: /osxcross/tarballs
@@ -99,12 +98,9 @@ jobs:
           name: osxcross-tarballs
 
       - name: Build osxcross
-        if: steps.osxcross-cache.outputs.cache-hit != 'true'
-        run: |
-          pushd /osxcross
-          dnf -y install clang llvm-devel libxml2-devel libuuid-devel openssl-devel bash patch libstdc++-static make cmake
-          UNATTENDED=1 ./build.sh
-          popd
+        if: steps.osxcross-target.outputs.cache-hit != 'true'
+        run: UNATTENDED=1 ./build.sh
+        working-directory: /osxcross
 
       - name: Setup cross compile environment for Darwin AMD64
         env:
