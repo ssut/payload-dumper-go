@@ -6,13 +6,42 @@ on:
       - '*'
 
 jobs:
+  macos-sdk:
+    runs-on: macos-latest
+    steps:
+      - id: osxcross-macos-sdk
+        uses: actions/cache@v2
+        with:
+          path: osxcross/tarballs
+          key: ${{ runner.os }}-osxcross-macos-sdk
+
+      - name: Package MacOSX SDK
+        if: steps.osxcross-macos-sdk.outputs.cache-hit != 'true'
+        run: |
+          git clone https://github.com/tpoechtrager/osxcross osxcross
+          pushd osxcross
+          XCODEDIR=/Applications/Xcode_12.4.app tools/gen_sdk_package.sh
+          mv MacOSX*.sdk.tar.xz tarballs/
+          popd
+
+      - uses: actions/upload-artifact@master
+        with:
+          name: osxcross-tarballs
+          path: osxcross/tarballs
+
   goreleaser:
     runs-on: ubuntu-latest
-    container: fedora:33
+    container: fedora:34
+    needs: macos-sdk
 
     steps:
       - name: Install dependencies
-        run: dnf -y install git golang mingw{32,64}-gcc{-c++,} mingw{32,64}-{winpthreads,xz-libs}-static glibc-{devel,static}.{i686,x86_64} xz-{devel,static}.{i686,x86_64}
+        run: |
+          dnf -y install autoconf bash clang cmake gettext-devel git glibc-{devel,static}.{i686,x86_64} golang libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
+          dnf -y install 'dnf-command(download)'
+          dnf download --source xz-devel
+          rpm -ivh *.src.rpm
+          rm -f *.src.rpm
 
       - name: Setup cross compile environment for Linux ARMv7
         env:
@@ -20,15 +49,12 @@ jobs:
           CXX: arm-linux-gnueabihf-c++
           CFLAGS: -fPIC
         run: |
-          dnf -y install 'dnf-command(copr)'
           dnf -y copr enable lantw44/arm-linux-gnueabihf-toolchain
           dnf -y install arm-linux-gnueabihf-{binutils,gcc,glibc}
-          dnf -y install autoconf gettext-devel libtool po4a wget
           mkdir /linux-armv7-buildroot
           pushd /linux-armv7-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           ./autogen.sh
           ./configure --host=armv7 --prefix=/linux-armv7-buildroot/sys-root
           make -j$(nproc) install
@@ -44,30 +70,37 @@ jobs:
           dnf -y install aarch64-linux-gnu-{binutils,gcc,glibc}
           mkdir /linux-aarch64-buildroot
           pushd /linux-aarch64-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           ./autogen.sh
           ./configure --host=aarch64 --prefix=/linux-aarch64-buildroot/sys-root
           make -j$(nproc) install
           popd
           popd
 
-      - id: osxcross-cache
+      - name: Download osxcross
+        run: git clone https://github.com/tpoechtrager/osxcross /osxcross
+
+      - id: osxcross-target
         uses: actions/cache@v2
         with:
-          path: /osxcross
-          key: ${{ runner.os }}-osxcross
+          path: /osxcross/target
+          key: ${{ runner.os }}-osxcross-target
+
+      - uses: actions/download-artifact@master
+        if: steps.osxcross-target.outputs.cache-hit != 'true'
+        with:
+          name: osxcross-tarballs
+          path: /osxcross/tarballs
+
+      - uses: geekyeggo/delete-artifact@v1
+        with:
+          name: osxcross-tarballs
 
       - name: Build osxcross
-        if: steps.osxcross-cache.outputs.cache-hit != 'true'
-        run: |
-          git clone https://github.com/tpoechtrager/osxcross /osxcross
-          pushd /osxcross
-          dnf -y install clang llvm-devel libxml2-devel libuuid-devel openssl-devel bash patch libstdc++-static make cmake
-          wget https://s3.dockerproject.org/darwin/v2/MacOSX10.11.sdk.tar.xz -O tarballs/MacOSX10.11.sdk.tar.xz
-          UNATTENDED=1 ./build.sh
-          popd
+        if: steps.osxcross-target.outputs.cache-hit != 'true'
+        run: UNATTENDED=1 ./build.sh
+        working-directory: /osxcross
 
       - name: Setup cross compile environment for Darwin AMD64
         env:
@@ -76,11 +109,25 @@ jobs:
         run: |
           mkdir /darwin-amd64-buildroot
           pushd /darwin-amd64-buildroot
-          wget https://tukaani.org/xz/xz-5.2.5.tar.gz
-          tar -xvf xz-5.2.5.tar.gz
-          pushd xz-5.2.5
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin15 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin20.2 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
+          popd
+          popd
+
+      - name: Setup cross compile environment for Darwin AArch64
+        env:
+          CC: oa64-clang
+          CXX: oa64-clang++
+        run: |
+          mkdir /darwin-aarch64-buildroot
+          pushd /darwin-aarch64-buildroot
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
+          PATH=/osxcross/target/bin:$PATH ./autogen.sh
+          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin20.2 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
