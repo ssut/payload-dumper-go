@@ -2,7 +2,7 @@
 
 An android OTA payload dumper written in Go.
 
-Download prebuilt binaries for macOS and windows via [here](https://github.com/ssut/payload-dumper-go/releases).
+Download prebuilt binaries for macOS, Windows and Linux via [here](https://github.com/ssut/payload-dumper-go/releases).
 
 ## Features
 
