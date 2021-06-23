@@ -48,8 +48,21 @@ func extractPayloadBin(filename string) string {
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
-	list := flag.Bool("l", false, "Show list of partitions in payload.bin")
-	partitions := flag.String("p", "", "Dump only selected partitions")
+	var (
+		list            bool
+		partitions      string
+		outputDirectory string
+		concurrency     int
+	)
+
+	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
+	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
+	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
+	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
+	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
+	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
+	flag.IntVar(&concurrency, "concurrency", 4, "Number of multiple workers to extract")
+	flag.IntVar(&concurrency, "c", 4, "Number of multiple workers to extract (shorthand)")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -79,17 +92,27 @@ func main() {
 	}
 	payload.Init()
 
-	if *list {
+	if list {
 		return
 	}
 
 	now := time.Now()
-	targetDirectory := fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
-	if err := os.Mkdir(targetDirectory, 0755); err != nil {
-		log.Fatal("Failed to create target directory")
+
+	var targetDirectory = outputDirectory
+	if targetDirectory == "" {
+		targetDirectory = fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
 	}
-	if *partitions != "" {
-		if err := payload.ExtractSelected(targetDirectory, strings.Split(*partitions, ",")); err != nil {
+	if _, err := os.Stat(targetDirectory); os.IsNotExist(err) {
+		if err := os.Mkdir(targetDirectory, 0755); err != nil {
+			log.Fatal("Failed to create target directory")
+		}
+	}
+
+	payload.SetConcurrency(concurrency)
+	fmt.Printf("Number of workers: %d\n", payload.GetConcurrency())
+
+	if partitions != "" {
+		if err := payload.ExtractSelected(targetDirectory, strings.Split(partitions, ",")); err != nil {
 			log.Fatal(err)
 		}
 	} else {
