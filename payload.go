@@ -34,6 +34,8 @@ type Payload struct {
 	deltaArchiveManifest *chromeos_update_engine.DeltaArchiveManifest
 	signatures           *chromeos_update_engine.Signatures
 
+	concurrency int
+
 	metadataSize int64
 	dataOffset   int64
 	initialized  bool
@@ -101,10 +103,21 @@ func (ph *payloadHeader) ReadFromPayload() error {
 // NewPayload creates a new Payload struct
 func NewPayload(filename string) Payload {
 	payload := Payload{
-		Filename: filename,
+		Filename:    filename,
+		concurrency: 4,
 	}
 
 	return payload
+}
+
+// SetConcurrency sets number of workers
+func (p *Payload) SetConcurrency(concurrency int) {
+	p.concurrency = concurrency
+}
+
+// GetConcurrency returns number of workers
+func (p *Payload) GetConcurrency() int {
+	return p.concurrency
 }
 
 // Open tries to open payload.bin file defined by Filename
@@ -318,7 +331,7 @@ func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) e
 	p.progress = mpb.New()
 
 	p.requests = make(chan *request, 100)
-	p.spawnExtractWorkers(4)
+	p.spawnExtractWorkers(p.concurrency)
 
 	sort.Strings(partitions)
 
