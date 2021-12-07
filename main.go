@@ -55,14 +55,14 @@ func main() {
 		concurrency     int
 	)
 
-	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
-	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
-	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
-	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
-	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
-	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
-	flag.IntVar(&concurrency, "concurrency", 4, "Number of multiple workers to extract")
 	flag.IntVar(&concurrency, "c", 4, "Number of multiple workers to extract (shorthand)")
+	flag.IntVar(&concurrency, "concurrency", 4, "Number of multiple workers to extract")
+	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
+	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
+	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
+	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
+	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
+	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -123,7 +123,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, "Usage: %s [inputfile]\n", os.Args[0])
+	fmt.Fprintf(os.Stderr, "Usage: %s [options] [inputfile]\n", os.Args[0])
 	flag.PrintDefaults()
 	os.Exit(2)
 }
