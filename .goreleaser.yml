@@ -1,3 +1,6 @@
+checksum:
+  name_template: "{{ .ProjectName }}_sha256checksums.txt"
+  algorithm: sha256
 env:
   - CGO_ENABLED=1
 builds:
