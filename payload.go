@@ -312,6 +312,7 @@ func (p *Payload) worker() {
 		if err != nil {
 		}
 		if err := p.Extract(partition, file); err != nil {
+			fmt.Println(err.Error())
 		}
 
 		p.workerWG.Done()
