@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"compress/bzip2"
 	"crypto/sha256"
 	"encoding/binary"
@@ -286,6 +287,18 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			}
 			break
 
+		case chromeos_update_engine.InstallOperation_ZERO:
+			reader := bytes.NewReader(make([]byte, expectedUncompressedBlockSize))
+			n, err := io.Copy(out, reader)
+			if err != nil {
+				return err
+			}
+
+			if n != expectedUncompressedBlockSize {
+				return fmt.Errorf("Verify failed (Unexpected bytes written): %s (%d != %d)", name, n, expectedUncompressedBlockSize)
+			}
+			break
+
 		default:
 			return fmt.Errorf("Unhandled operation type: %s", operation.GetType().String())
 		}
@@ -293,7 +306,7 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 		// verify hash
 		hash := hex.EncodeToString(bufSha.Sum(nil))
 		expectedHash := hex.EncodeToString(operation.GetDataSha256Hash())
-		if hash != expectedHash {
+		if expectedHash != "" && hash != expectedHash {
 			return fmt.Errorf("Verify failed (Checksum mismatch): %s (%s != %s)", name, hash, expectedHash)
 		}
 	}
@@ -312,6 +325,7 @@ func (p *Payload) worker() {
 		if err != nil {
 		}
 		if err := p.Extract(partition, file); err != nil {
+			fmt.Println(err.Error())
 		}
 
 		p.workerWG.Done()
