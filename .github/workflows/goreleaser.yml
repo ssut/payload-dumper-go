@@ -134,6 +134,9 @@ jobs:
 
       - uses: actions/checkout@v2
 
+      - name: Add $GITHUB_WORKSPACE to git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - uses: goreleaser/goreleaser-action@v2
         with:
           version: latest
