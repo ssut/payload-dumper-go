@@ -191,10 +191,10 @@ func (p *Payload) Init() error {
 
 	fmt.Println("Found partitions:")
 	for i, partition := range p.deltaArchiveManifest.Partitions {
-		fmt.Printf("%s (%s)", partition.GetPartitionName(), humanize.Bytes(*partition.GetNewPartitionInfo().Size))
+		fmt.Printf(" %s (%s)", partition.GetPartitionName(), humanize.Bytes(*partition.GetNewPartitionInfo().Size))
 
 		if i < len(deltaArchiveManifest.Partitions)-1 {
-			fmt.Printf(", ")
+			fmt.Printf(",\n")
 		} else {
 			fmt.Printf("\n")
 		}
