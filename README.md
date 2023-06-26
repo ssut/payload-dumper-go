@@ -18,7 +18,7 @@ See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-
 
 ### Limitations
 
-- Incremental OTA(delta) payload is not supported.
+- Incremental OTA (delta) payload is not supported.
 
 ## Installation
 
