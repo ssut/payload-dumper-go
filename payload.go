@@ -23,6 +23,7 @@ import (
 
 type request struct {
 	partition       *chromeos_update_engine.PartitionUpdate
+	sourceDirectory string
 	targetDirectory string
 }
 
@@ -178,6 +179,8 @@ func (p *Payload) Init() error {
 	}
 	p.deltaArchiveManifest = deltaArchiveManifest
 
+	fmt.Printf("Payload Minor Version: %d\n", deltaArchiveManifest.GetMinorVersion())
+
 	// Read Signatures
 	signatures, err := p.readMetadataSignature()
 	if err != nil {
@@ -217,9 +220,10 @@ func (p *Payload) readDataBlob(offset int64, length int64) ([]byte, error) {
 	return buf, nil
 }
 
-func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out *os.File) error {
+func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out *os.File, in *os.File) error {
 	name := partition.GetPartitionName()
 	info := partition.GetNewPartitionInfo()
+	isDelta := in != nil
 	totalOperations := len(partition.Operations)
 	barName := fmt.Sprintf("%s (%s)", name, humanize.Bytes(info.GetSize()))
 	bar := p.progress.AddBar(
@@ -250,6 +254,10 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 
 		bufSha := sha256.New()
 		teeReader := io.TeeReader(io.NewSectionReader(p.file, dataOffset, dataLength), bufSha)
+
+		dataBuf := make([]byte, dataLength)
+
+		teeReader.Read(dataBuf)
 
 		switch operation.GetType() {
 		case chromeos_update_engine.InstallOperation_REPLACE:
@@ -299,8 +307,147 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 			}
 			break
 
+		case chromeos_update_engine.InstallOperation_SOURCE_COPY:
+			if !isDelta {
+				return fmt.Errorf("%s: SOURCE_COPY is only supported for delta", name)
+			}
+
+			for _, e := range operation.SrcExtents {
+				_, err := in.Seek(int64(e.GetStartBlock()) * blockSize, 0)
+				if err != nil {
+					return err
+				}
+
+				expectedInputBlockSize := int64(e.GetNumBlocks()) * blockSize
+
+				data := make([]byte, expectedInputBlockSize)
+				n, err := in.Read(data)
+
+				if err != nil {
+					fmt.Printf("%s: SOURCE_COPY error: %s (read %d)\n", name, err, n)
+					return err
+				}
+
+				if int64(n) != expectedInputBlockSize {
+					return fmt.Errorf("%s: SOURCE_COPY expected %d bytes, but got %d", name, expectedInputBlockSize, n)
+				}
+
+				if _, err := out.Write(data[:n]); err != nil {
+					return err
+				}
+			}
+			break
+
+		case chromeos_update_engine.InstallOperation_SOURCE_BSDIFF:
+		case chromeos_update_engine.InstallOperation_BSDIFF:
+		case chromeos_update_engine.InstallOperation_BROTLI_BSDIFF:
+			if !isDelta {
+				return fmt.Errorf("%s: %s is only supported for delta", name, operation.GetType().String())
+			}
+
+			buf := make([]byte, 0)
+
+			for _, e := range operation.SrcExtents {
+				_, err := in.Seek(int64(e.GetStartBlock()) * blockSize, 0)
+				if err != nil {
+					return err
+				}
+
+				expectedInputBlockSize := int64(e.GetNumBlocks()) * blockSize
+
+				data := make([]byte, expectedInputBlockSize)
+				n, err := in.Read(data)
+
+				if err != nil {
+					fmt.Printf("%s: %s error: %s (read %d)\n", name, operation.GetType().String(), err, n)
+					return err
+				}
+
+				if int64(n) != expectedInputBlockSize {
+					return fmt.Errorf("%s: %s expected %d bytes, but got %d", name, operation.GetType().String(), expectedInputBlockSize, n)
+				}
+
+				buf = append(buf, data...)
+			}
+
+			buf, err := chromeos_update_engine.ExecuteSourceBsdiffOperation(buf, dataBuf)
+
+			if err != nil {
+				return err
+			}
+
+			n := uint64(0)
+
+			for _, e := range operation.DstExtents {
+				_, err := out.Seek(int64(e.GetStartBlock())*blockSize, 0)
+				if err != nil {
+					return err
+				}
+
+				data := make([]byte, e.GetNumBlocks() * blockSize)
+				copy(data, buf[n*blockSize:])
+				if _, err := out.Write(data); err != nil {
+					return err
+				}
+				n += e.GetNumBlocks()
+			}
+			break
+		case chromeos_update_engine.InstallOperation_PUFFDIFF:
+			if !isDelta {
+				return fmt.Errorf("%s: %s is only supported for delta", name, operation.GetType().String())
+			}
+
+			buf := make([]byte, 0)
+
+			for _, e := range operation.SrcExtents {
+				_, err := in.Seek(int64(e.GetStartBlock()) * blockSize, 0)
+				if err != nil {
+					return err
+				}
+
+				expectedInputBlockSize := int64(e.GetNumBlocks()) * blockSize
+
+				data := make([]byte, expectedInputBlockSize)
+				n, err := in.Read(data)
+
+				if err != nil {
+					fmt.Printf("%s: %s error: %s (read %d)\n", name, operation.GetType().String(), err, n)
+					return err
+				}
+
+				if int64(n) != expectedInputBlockSize {
+					return fmt.Errorf("%s: %s expected %d bytes, but got %d", name, operation.GetType().String(), expectedInputBlockSize, n)
+				}
+
+				buf = append(buf, data...)
+			}
+
+			buf, err := chromeos_update_engine.ExecuteSourcePuffDiffOperation(buf, dataBuf)
+
+			if err != nil {
+				return err
+			}
+
+			n := uint64(0)
+
+			for _, e := range operation.DstExtents {
+				_, err := out.Seek(int64(e.GetStartBlock())*blockSize, 0)
+				if err != nil {
+					return err
+				}
+
+				data := make([]byte, e.GetNumBlocks() * blockSize)
+				copy(data, buf[n*blockSize:])
+				if _, err := out.Write(data); err != nil {
+					return err
+				}
+				n += e.GetNumBlocks()
+			}
+			break
+			return fmt.Errorf("%s: PUFFDIFF is not yet implemented!", name)
+
 		default:
-			return fmt.Errorf("Unhandled operation type: %s", operation.GetType().String())
+			return fmt.Errorf("%s: Unhandled operation type: %s", name, operation.GetType().String())
 		}
 
 		// verify hash
@@ -318,13 +465,28 @@ func (p *Payload) worker() {
 	for req := range p.requests {
 		partition := req.partition
 		targetDirectory := req.targetDirectory
+		sourceDirectory := req.sourceDirectory
+		isDelta := sourceDirectory != ""
 
 		name := fmt.Sprintf("%s.img", partition.GetPartitionName())
 		filepath := fmt.Sprintf("%s/%s", targetDirectory, name)
 		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0755)
 		if err != nil {
 		}
-		if err := p.Extract(partition, file); err != nil {
+
+
+		sourcepath := fmt.Sprintf("%s/%s", sourceDirectory, name)
+		sourcefile, err := os.OpenFile(sourcepath, os.O_RDONLY, 0755)
+		if isDelta {
+			if err != nil {
+				fmt.Println(err.Error())
+			}
+		} else {
+			sourcefile = nil
+		}
+
+
+		if err := p.Extract(partition, file, sourcefile); err != nil {
 			fmt.Println(err.Error())
 		}
 
@@ -338,7 +500,7 @@ func (p *Payload) spawnExtractWorkers(n int) {
 	}
 }
 
-func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) error {
+func (p *Payload) ExtractSelected(sourceDirectory string, targetDirectory string, partitions []string) error {
 	if !p.initialized {
 		return errors.New("Payload has not been initialized")
 	}
@@ -360,6 +522,7 @@ func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) e
 		p.workerWG.Add(1)
 		p.requests <- &request{
 			partition:       partition,
+			sourceDirectory: sourceDirectory,
 			targetDirectory: targetDirectory,
 		}
 	}
@@ -370,6 +533,6 @@ func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) e
 	return nil
 }
 
-func (p *Payload) ExtractAll(targetDirectory string) error {
-	return p.ExtractSelected(targetDirectory, nil)
+func (p *Payload) ExtractAll(sourceDirectory string, targetDirectory string) error {
+	return p.ExtractSelected(sourceDirectory, targetDirectory, nil)
 }

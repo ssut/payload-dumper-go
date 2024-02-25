@@ -18,7 +18,7 @@ See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-
 
 ### Limitations
 
-- Incremental OTA (delta) payload is not supported.
+- Incremental OTA (delta) payload is not fully tested and probably broken.
 
 ## Installation
 
@@ -55,6 +55,20 @@ payload-dumper-go /path/to/payload.bin
 ## Sources
 
 https://android.googlesource.com/platform/system/update_engine/+/master/update_metadata.proto
+
+## Compilation
+
+### Linux and OSX
+```
+git submodule update --init --recursive
+go generate chromeos_update_engine/update_engine.go 
+go build .
+```
+
+### Windows
+
+#### TODO
+
 
 ## License
 

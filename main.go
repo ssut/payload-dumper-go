@@ -52,6 +52,7 @@ func main() {
 		list            bool
 		partitions      string
 		outputDirectory string
+		inputDirectory  string
 		concurrency     int
 	)
 
@@ -61,6 +62,8 @@ func main() {
 	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
 	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
 	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
+	flag.StringVar(&inputDirectory, "d", "", "Set input directory for delta payload (shorthand)")
+	flag.StringVar(&inputDirectory, "delta", "", "Set input directory for delta payload")
 	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
 	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
 	flag.Parse()
@@ -73,6 +76,8 @@ func main() {
 	if _, err := os.Stat(filename); os.IsNotExist(err) {
 		log.Fatalf("File does not exist: %s\n", filename)
 	}
+
+	log.Printf("Delta: %s, partitions: %s\n", inputDirectory, partitions)
 
 	payloadBin := filename
 	if strings.HasSuffix(filename, ".zip") {
@@ -107,16 +112,16 @@ func main() {
 			log.Fatal("Failed to create target directory")
 		}
 	}
-
+	var sourceDirectory = inputDirectory
 	payload.SetConcurrency(concurrency)
 	fmt.Printf("Number of workers: %d\n", payload.GetConcurrency())
 
 	if partitions != "" {
-		if err := payload.ExtractSelected(targetDirectory, strings.Split(partitions, ",")); err != nil {
+		if err := payload.ExtractSelected(sourceDirectory, targetDirectory, strings.Split(partitions, ",")); err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		if err := payload.ExtractAll(targetDirectory); err != nil {
+		if err := payload.ExtractAll(sourceDirectory, targetDirectory); err != nil {
 			log.Fatal(err)
 		}
 	}
