@@ -1,0 +1,18 @@
+[submodule "chromeos_update_engine/brotli"]
+	path = chromeos_update_engine/brotli
+	url = https://github.com/anonymix007/brotli
+[submodule "chromeos_update_engine/bsdiff"]
+	path = chromeos_update_engine/bsdiff
+	url = https://github.com/anonymix007/bsdiff
+[submodule "chromeos_update_engine/bzip2"]
+	path = chromeos_update_engine/bzip2
+	url = https://github.com/anonymix007/bzip2
+[submodule "chromeos_update_engine/libchrome"]
+	path = chromeos_update_engine/libchrome
+	url = https://github.com/anonymix007/libchrome
+[submodule "chromeos_update_engine/puffin"]
+	path = chromeos_update_engine/puffin
+	url = https://github.com/anonymix007/puffin
+[submodule "chromeos_update_engine/zucchini"]
+	path = chromeos_update_engine/zucchini
+	url = https://github.com/anonymix007/zucchini
