@@ -24,6 +24,7 @@ import (
 type request struct {
 	partition       *chromeos_update_engine.PartitionUpdate
 	targetDirectory string
+	quiet           bool
 }
 
 // Payload is a new format for the Android OTA/Firmware update files since Android Oreo
@@ -217,27 +218,36 @@ func (p *Payload) readDataBlob(offset int64, length int64) ([]byte, error) {
 	return buf, nil
 }
 
-func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out *os.File) error {
+func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out *os.File, quiet bool) error {
 	name := partition.GetPartitionName()
 	info := partition.GetNewPartitionInfo()
 	totalOperations := len(partition.Operations)
-	barName := fmt.Sprintf("%s (%s)", name, humanize.Bytes(info.GetSize()))
-	bar := p.progress.AddBar(
-		int64(totalOperations),
-		mpb.PrependDecorators(
-			decor.Name(barName, decor.WCSyncSpaceR),
-		),
-		mpb.AppendDecorators(
-			decor.Percentage(),
-		),
-	)
-	defer bar.SetTotal(0, true)
+	var bar *mpb.Bar
+	if !quiet {
+		barName := fmt.Sprintf("%s (%s)", name, humanize.Bytes(info.GetSize()))
+		bar = p.progress.AddBar(
+			int64(totalOperations),
+			mpb.PrependDecorators(
+				decor.Name(barName, decor.WCSyncSpaceR),
+			),
+			mpb.AppendDecorators(
+				decor.Percentage(),
+			),
+		)
+	}
+	defer func() {
+		if bar != nil {
+			bar.SetTotal(0, true)
+		}
+	}()
 
 	for _, operation := range partition.Operations {
 		if len(operation.DstExtents) == 0 {
 			return fmt.Errorf("Invalid operation.DstExtents for the partition %s", name)
 		}
-		bar.Increment()
+		if bar != nil {
+			bar.Increment()
+		}
 
 		e := operation.DstExtents[0]
 		dataOffset := p.dataOffset + int64(operation.GetDataOffset())
@@ -324,7 +334,7 @@ func (p *Payload) worker() {
 		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0755)
 		if err != nil {
 		}
-		if err := p.Extract(partition, file); err != nil {
+		if err := p.Extract(partition, file, req.quiet); err != nil {
 			fmt.Println(err.Error())
 		}
 
@@ -338,7 +348,7 @@ func (p *Payload) spawnExtractWorkers(n int) {
 	}
 }
 
-func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) error {
+func (p *Payload) ExtractSelected(targetDirectory string, partitions []string, quiet bool) error {
 	if !p.initialized {
 		return errors.New("Payload has not been initialized")
 	}
@@ -361,6 +371,7 @@ func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) e
 		p.requests <- &request{
 			partition:       partition,
 			targetDirectory: targetDirectory,
+			quiet:           quiet,
 		}
 	}
 
@@ -370,6 +381,6 @@ func (p *Payload) ExtractSelected(targetDirectory string, partitions []string) e
 	return nil
 }
 
-func (p *Payload) ExtractAll(targetDirectory string) error {
-	return p.ExtractSelected(targetDirectory, nil)
+func (p *Payload) ExtractAll(targetDirectory string, quiet bool) error {
+	return p.ExtractSelected(targetDirectory, nil, quiet)
 }
