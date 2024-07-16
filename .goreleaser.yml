@@ -11,7 +11,7 @@ builds:
     goos:
       - windows
     goarch:
-      - 386
+      - "386"
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-windows-amd64
@@ -28,7 +28,7 @@ builds:
     goos:
       - linux
     goarch:
-      - 386
+      - "386"
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-linux-amd64
