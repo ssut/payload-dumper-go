@@ -52,6 +52,7 @@ func main() {
 		partitions      string
 		outputDirectory string
 		concurrency     int
+		quiet           bool
 	)
 
 	flag.IntVar(&concurrency, "c", 4, "Number of multiple workers to extract (shorthand)")
@@ -62,6 +63,8 @@ func main() {
 	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
 	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
 	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
+	flag.BoolVar(&quiet, "q", false, "Quiet mode (shorthand)")
+	flag.BoolVar(&quiet, "quiet", false, "Quiet mode")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -111,11 +114,11 @@ func main() {
 	fmt.Printf("Number of workers: %d\n", payload.GetConcurrency())
 
 	if partitions != "" {
-		if err := payload.ExtractSelected(targetDirectory, strings.Split(partitions, ",")); err != nil {
+		if err := payload.ExtractSelected(targetDirectory, strings.Split(partitions, ","), quiet); err != nil {
 			log.Fatal(err)
 		}
 	} else {
-		if err := payload.ExtractAll(targetDirectory); err != nil {
+		if err := payload.ExtractAll(targetDirectory, quiet); err != nil {
 			log.Fatal(err)
 		}
 	}
