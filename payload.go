@@ -14,11 +14,12 @@ import (
 	"sync"
 
 	humanize "github.com/dustin/go-humanize"
-	"github.com/golang/protobuf/proto"
 	xz "github.com/spencercw/go-xz"
-	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 	"github.com/vbauerster/mpb/v5"
 	"github.com/vbauerster/mpb/v5/decor"
+	"google.golang.org/protobuf/proto"
+
+	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 )
 
 type request struct {
@@ -46,9 +47,11 @@ type Payload struct {
 	progress *mpb.Progress
 }
 
-const payloadHeaderMagic = "CrAU"
-const brilloMajorPayloadVersion = 2
-const blockSize = 4096
+const (
+	payloadHeaderMagic        = "CrAU"
+	brilloMajorPayloadVersion = 2
+	blockSize                 = 4096
+)
 
 type payloadHeader struct {
 	Version              uint64
@@ -102,8 +105,8 @@ func (ph *payloadHeader) ReadFromPayload() error {
 }
 
 // NewPayload creates a new Payload struct
-func NewPayload(filename string) Payload {
-	payload := Payload{
+func NewPayload(filename string) *Payload {
+	payload := &Payload{
 		Filename:    filename,
 		concurrency: 4,
 	}
@@ -321,7 +324,7 @@ func (p *Payload) worker() {
 
 		name := fmt.Sprintf("%s.img", partition.GetPartitionName())
 		filepath := fmt.Sprintf("%s/%s", targetDirectory, name)
-		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0755)
+		file, err := os.OpenFile(filepath, os.O_TRUNC|os.O_CREATE|os.O_WRONLY, 0o755)
 		if err != nil {
 		}
 		if err := p.Extract(partition, file); err != nil {

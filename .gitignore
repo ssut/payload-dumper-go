@@ -22,8 +22,12 @@
 /vendor/
 /Godeps/
 
+### Go Workspace ###
+go.work
+go.work.sum
+
 ### vscode ###
-.vscode/*
+.vscode/
 !.vscode/settings.json
 !.vscode/tasks.json
 !.vscode/launch.json

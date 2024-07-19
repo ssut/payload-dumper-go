@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"os"
 	"runtime"
@@ -27,7 +26,7 @@ func extractPayloadBin(filename string) string {
 				log.Fatalf("Failed to read zipped file: %s\n", file.Name)
 			}
 
-			tempfile, err := ioutil.TempFile(os.TempDir(), "payload_*.bin")
+			tempfile, err := os.CreateTemp(os.TempDir(), "payload_*.bin")
 			if err != nil {
 				log.Fatalf("Failed to create a temp file located at %s\n", tempfile.Name())
 			}
@@ -98,12 +97,12 @@ func main() {
 
 	now := time.Now()
 
-	var targetDirectory = outputDirectory
+	targetDirectory := outputDirectory
 	if targetDirectory == "" {
 		targetDirectory = fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
 	}
 	if _, err := os.Stat(targetDirectory); os.IsNotExist(err) {
-		if err := os.Mkdir(targetDirectory, 0755); err != nil {
+		if err := os.Mkdir(targetDirectory, 0o755); err != nil {
 			log.Fatal("Failed to create target directory")
 		}
 	}
