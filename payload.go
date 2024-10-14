@@ -12,6 +12,7 @@ import (
 	"os"
 	"sort"
 	"sync"
+	"github.com/valyala/gozstd"
 
 	humanize "github.com/dustin/go-humanize"
 	xz "github.com/spencercw/go-xz"
@@ -281,6 +282,17 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 
 		case chromeos_update_engine.InstallOperation_REPLACE_BZ:
 			reader := bzip2.NewReader(teeReader)
+			n, err := io.Copy(out, reader)
+			if err != nil {
+				return err
+			}
+			if n != expectedUncompressedBlockSize {
+				return fmt.Errorf("Verify failed (Unexpected bytes written): %s (%d != %d)", name, n, expectedUncompressedBlockSize)
+			}
+			break
+
+		case chromeos_update_engine.InstallOperation_ZSTD:
+			reader := gozstd.NewReader(teeReader)
 			n, err := io.Copy(out, reader)
 			if err != nil {
 				return err

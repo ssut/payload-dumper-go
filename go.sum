@@ -9,6 +9,8 @@ github.com/mattn/go-runewidth v0.0.9 h1:Lm995f3rfxdpd6TSmuVCHVb/QhupuXlYr8sCI/Qd
 github.com/mattn/go-runewidth v0.0.9/go.mod h1:H031xJmbD/WCDINGzjvQ9THkh0rPKHF+m2gUSrubnMI=
 github.com/spencercw/go-xz v0.0.0-20181128201811-c82a2123b492 h1:8J9q7E8tGpVB84cBsMr+X160ECRqwYhkZ6KeaY9kN1I=
 github.com/spencercw/go-xz v0.0.0-20181128201811-c82a2123b492/go.mod h1:EvRrgz1GcjNV5yfN+ISxA4sxn255MimeGQ/ROJnQPtQ=
+github.com/valyala/gozstd v1.21.1 h1:TQFZVTk5zo7iJcX3o4XYBJujPdO31LFb4fVImwK873A=
+github.com/valyala/gozstd v1.21.1/go.mod h1:y5Ew47GLlP37EkTB+B4s7r6A5rdaeB7ftbl9zoYiIPQ=
 github.com/vbauerster/mpb/v5 v5.4.0 h1:n8JPunifvQvh6P1D1HAl2Ur9YcmKT1tpoUuiea5mlmg=
 github.com/vbauerster/mpb/v5 v5.4.0/go.mod h1:fi4wVo7BVQ22QcvFObm+VwliQXlV1eBT8JDaKXR4JGI=
 golang.org/x/sys v0.0.0-20201218084310-7d0127a74742/go.mod h1:h1NjWce9XRLGQEsW7wpKNCjG9DtNlClVuFLEZdDNbEs=
