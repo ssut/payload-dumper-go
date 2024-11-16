@@ -99,7 +99,7 @@ jobs:
 
       - name: Build osxcross
         if: steps.osxcross-target.outputs.cache-hit != 'true'
-        run: UNATTENDED=1 ./build.sh
+        run: UNATTENDED=1 SDK_VERSION=15.0 ./build.sh
         working-directory: /osxcross
 
       - name: Setup cross compile environment for Darwin AMD64
