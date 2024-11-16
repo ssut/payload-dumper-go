@@ -3,7 +3,7 @@ name: goreleaser
 on:
   push:
     tags:
-      - '*'
+      - "*"
 
 jobs:
   macos-sdk:
@@ -20,7 +20,7 @@ jobs:
         run: |
           git clone https://github.com/tpoechtrager/osxcross osxcross
           pushd osxcross
-          XCODEDIR=/Applications/Xcode_12.4.app tools/gen_sdk_package.sh
+          XCODEDIR=/Applications/Xcode_16.0.app tools/gen_sdk_package.sh
           mv MacOSX*.sdk.tar.xz tarballs/
           popd
 
@@ -142,4 +142,4 @@ jobs:
           version: latest
           args: release --rm-dist
         env:
-          GITHUB_TOKEN: '${{ secrets.GITHUB_TOKEN }}'
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
