@@ -45,12 +45,12 @@ jobs:
 
       - name: Setup cross compile environment for Linux ARMv7
         env:
-          CC: arm-linux-gnueabihf-gcc
-          CXX: arm-linux-gnueabihf-c++
+          CC: arm-linux-gnueabi-gcc
+          CXX: arm-linux-gnueabi-c++
           CFLAGS: -fPIC
         run: |
-          dnf -y copr enable lantw44/arm-linux-gnueabihf-toolchain
-          dnf -y install arm-linux-gnueabihf-{binutils,gcc,glibc}
+          dnf -y copr enable lantw44/arm-linux-gnueabi-toolchain
+          dnf -y install arm-linux-gnueabi-{binutils,gcc,glibc}
           mkdir /linux-armv7-buildroot
           pushd /linux-armv7-buildroot
           tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz

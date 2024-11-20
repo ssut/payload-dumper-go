@@ -23,8 +23,8 @@ builds:
       - '-extldflags "-static -s -w"'
   - id: build-linux-armv7
     env:
-      - CC=arm-linux-gnueabihf-gcc
-      - CXX=arm-linux-gnueabihf-c++
+      - CC=arm-linux-gnueabi-gcc
+      - CXX=arm-linux-gnueabi-c++
       - CGO_CFLAGS=-I/linux-armv7-buildroot/sys-root/include
       - CGO_LDFLAGS=-L/linux-armv7-buildroot/sys-root/lib
     goos:
