@@ -112,7 +112,7 @@ jobs:
           tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
           pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin20.2 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin24 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
@@ -127,7 +127,7 @@ jobs:
           tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
           pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin20.2 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin24 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
