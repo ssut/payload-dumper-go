@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - id: osxcross-macos-sdk
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: osxcross/tarballs
           key: ${{ runner.os }}-osxcross-macos-sdk
@@ -24,14 +24,14 @@ jobs:
           mv MacOSX*.sdk.tar.xz tarballs/
           popd
 
-      - uses: actions/upload-artifact@master
+      - uses: actions/upload-artifact@v4
         with:
           name: osxcross-tarballs
           path: osxcross/tarballs
 
   goreleaser:
     runs-on: ubuntu-latest
-    container: fedora:34
+    container: fedora:41
     needs: macos-sdk
 
     steps:
@@ -45,16 +45,16 @@ jobs:
 
       - name: Setup cross compile environment for Linux ARMv7
         env:
-          CC: arm-linux-gnueabihf-gcc
-          CXX: arm-linux-gnueabihf-c++
+          CC: arm-linux-gnueabi-gcc
+          CXX: arm-linux-gnueabi-c++
           CFLAGS: -fPIC
         run: |
-          dnf -y copr enable lantw44/arm-linux-gnueabihf-toolchain
-          dnf -y install arm-linux-gnueabihf-{binutils,gcc,glibc}
+          dnf -y copr enable lantw44/arm-linux-gnueabi-toolchain
+          dnf -y install arm-linux-gnueabi-{binutils,gcc,glibc}
           mkdir /linux-armv7-buildroot
           pushd /linux-armv7-buildroot
-          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
-          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           ./autogen.sh
           ./configure --host=armv7 --prefix=/linux-armv7-buildroot/sys-root
           make -j$(nproc) install
@@ -70,8 +70,8 @@ jobs:
           dnf -y install aarch64-linux-gnu-{binutils,gcc,glibc}
           mkdir /linux-aarch64-buildroot
           pushd /linux-aarch64-buildroot
-          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
-          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           ./autogen.sh
           ./configure --host=aarch64 --prefix=/linux-aarch64-buildroot/sys-root
           make -j$(nproc) install
@@ -82,18 +82,18 @@ jobs:
         run: git clone https://github.com/tpoechtrager/osxcross /osxcross
 
       - id: osxcross-target
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /osxcross/target
           key: ${{ runner.os }}-osxcross-target
 
-      - uses: actions/download-artifact@master
+      - uses: actions/download-artifact@v4
         if: steps.osxcross-target.outputs.cache-hit != 'true'
         with:
           name: osxcross-tarballs
           path: /osxcross/tarballs
 
-      - uses: geekyeggo/delete-artifact@v1
+      - uses: geekyeggo/delete-artifact@v5
         with:
           name: osxcross-tarballs
 
@@ -109,10 +109,10 @@ jobs:
         run: |
           mkdir /darwin-amd64-buildroot
           pushd /darwin-amd64-buildroot
-          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
-          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin20.2 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin24 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
@@ -124,22 +124,22 @@ jobs:
         run: |
           mkdir /darwin-aarch64-buildroot
           pushd /darwin-aarch64-buildroot
-          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.xz
-          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.xz .tar.xz)
+          tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
+          pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin20.2 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin24 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Add $GITHUB_WORKSPACE to git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: goreleaser/goreleaser-action@v3
+      - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
-          args: release --rm-dist
+          args: release --clean
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"

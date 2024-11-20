@@ -4,16 +4,6 @@ checksum:
 env:
   - CGO_ENABLED=1
 builds:
-  - id: build-windows-386
-    env:
-      - CC=i686-w64-mingw32-gcc
-      - CXX=i686-w64-mingw32-g++
-    goos:
-      - windows
-    goarch:
-      - "386"
-    ldflags:
-      - '-extldflags "-static -s -w"'
   - id: build-windows-amd64
     env:
       - CC=x86_64-w64-mingw32-gcc
@@ -22,13 +12,6 @@ builds:
       - windows
     goarch:
       - amd64
-    ldflags:
-      - '-extldflags "-static -s -w"'
-  - id: build-linux-386
-    goos:
-      - linux
-    goarch:
-      - "386"
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-linux-amd64
@@ -40,8 +23,8 @@ builds:
       - '-extldflags "-static -s -w"'
   - id: build-linux-armv7
     env:
-      - CC=arm-linux-gnueabihf-gcc
-      - CXX=arm-linux-gnueabihf-c++
+      - CC=arm-linux-gnueabi-gcc
+      - CXX=arm-linux-gnueabi-c++
       - CGO_CFLAGS=-I/linux-armv7-buildroot/sys-root/include
       - CGO_LDFLAGS=-L/linux-armv7-buildroot/sys-root/lib
     goos:
