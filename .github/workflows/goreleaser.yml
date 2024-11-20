@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - id: osxcross-macos-sdk
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: osxcross/tarballs
           key: ${{ runner.os }}-osxcross-macos-sdk
@@ -24,7 +24,7 @@ jobs:
           mv MacOSX*.sdk.tar.xz tarballs/
           popd
 
-      - uses: actions/upload-artifact@master
+      - uses: actions/upload-artifact@v4
         with:
           name: osxcross-tarballs
           path: osxcross/tarballs
@@ -82,18 +82,18 @@ jobs:
         run: git clone https://github.com/tpoechtrager/osxcross /osxcross
 
       - id: osxcross-target
-        uses: actions/cache@v2
+        uses: actions/cache@v4
         with:
           path: /osxcross/target
           key: ${{ runner.os }}-osxcross-target
 
-      - uses: actions/download-artifact@master
+      - uses: actions/download-artifact@v4
         if: steps.osxcross-target.outputs.cache-hit != 'true'
         with:
           name: osxcross-tarballs
           path: /osxcross/tarballs
 
-      - uses: geekyeggo/delete-artifact@v1
+      - uses: geekyeggo/delete-artifact@v5
         with:
           name: osxcross-tarballs
 
@@ -132,12 +132,12 @@ jobs:
           popd
           popd
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v4
 
       - name: Add $GITHUB_WORKSPACE to git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: goreleaser/goreleaser-action@v3
+      - uses: goreleaser/goreleaser-action@v6
         with:
           version: latest
           args: release --clean
