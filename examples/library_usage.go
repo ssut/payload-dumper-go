@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 
 	"github.com/ssut/payload-dumper-go/payload"
 )
@@ -146,7 +147,7 @@ func basicUsage(payloadFile string) {
 	}
 
 	// Configure extraction (old way)
-	reader.SetConcurrency(2)
+	reader.SetConcurrency(runtime.NumCPU())
 	fmt.Printf("Using %d workers for extraction\n", reader.GetConcurrency())
 
 	// Create output directory
@@ -174,7 +175,7 @@ func configUsage(payloadFile string) {
 
 	// Create and configure using Config object
 	config := payload.DefaultConfig()
-	config.Concurrency = 4
+	config.Concurrency = runtime.NumCPU()
 	config.QuietMode = false
 	config.MachineReadable = false
 	config.Logger = NewExampleLogger("CONFIG")
@@ -234,7 +235,7 @@ func optionsUsage(payloadFile string) {
 	if len(partitions) > 0 {
 		options := payload.ExtractOptions{
 			OutputDirectory:  outputDir,
-			Concurrency:      8,
+			Concurrency:      runtime.NumCPU(),
 			SelectedParts:    []string{partitions[0].Name},
 			QuietMode:        false,
 			MachineReadable:  false,

@@ -2,6 +2,7 @@ package payload
 
 import (
 	"io"
+	"runtime"
 
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 )
@@ -37,17 +38,17 @@ type ExtractOptions struct {
 
 // Config contains global configuration for payload operations
 type Config struct {
-	Concurrency     int
-	QuietMode       bool
-	MachineReadable bool
-	Logger          Logger
+	Concurrency      int
+	QuietMode        bool
+	MachineReadable  bool
+	Logger           Logger
 	ProgressReporter ProgressReporter
 }
 
 // DefaultConfig returns a default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		Concurrency:     4,
+		Concurrency:     runtime.NumCPU(),
 		QuietMode:       false,
 		MachineReadable: false,
 	}

@@ -158,8 +158,8 @@ func Execute() {
 		machineReadable bool
 	)
 
-	flag.IntVar(&concurrency, "c", 4, "Number of multiple workers to extract (shorthand)")
-	flag.IntVar(&concurrency, "concurrency", 4, "Number of multiple workers to extract")
+	flag.IntVar(&concurrency, "c", runtime.NumCPU(), "Number of multiple workers to extract (default: all CPU cores)")
+	flag.IntVar(&concurrency, "concurrency", runtime.NumCPU(), "Number of multiple workers to extract (default: all CPU cores)")
 	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
 	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
 	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
@@ -203,26 +203,26 @@ func Execute() {
 	}
 
 	payloadReader := payload.New(payloadBin)
-	
+
 	// Set up configuration
 	config := payload.DefaultConfig()
 	config.Concurrency = concurrency
 	config.QuietMode = quiet
 	config.MachineReadable = machineReadable
-	
+
 	// Set up logging
 	logger := NewStandardLogger(quiet)
 	config.Logger = logger
-	
+
 	// Set up progress reporting based on mode
 	if machineReadable {
 		config.ProgressReporter = NewMachineReadableProgressReporter(quiet)
 	} else if !quiet {
 		config.ProgressReporter = NewProgressReporter()
 	}
-	
+
 	payloadReader.SetConfig(config)
-	
+
 	if err := payloadReader.Open(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error opening payload: %v\n", err)
 		os.Exit(1)
@@ -236,7 +236,7 @@ func Execute() {
 
 	// Print payload information
 	partitionInfos := payloadReader.GetPartitions()
-	
+
 	if list {
 		if machineReadable {
 			// Machine-readable format: partition:size-in-KB
@@ -257,7 +257,7 @@ func Execute() {
 		}
 		return
 	}
-	
+
 	if !quiet && !machineReadable {
 		fmt.Println("Found partitions:")
 		for i, partitionInfo := range partitionInfos {
@@ -273,7 +273,7 @@ func Execute() {
 	now := time.Now()
 	targetDirectory := outputDirectory
 	if targetDirectory == "" {
-		targetDirectory = fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d", 
+		targetDirectory = fmt.Sprintf("extracted_%d%02d%02d_%02d%02d%02d",
 			now.Year(), now.Month(), now.Day(), now.Hour(), now.Minute(), now.Second())
 	}
 

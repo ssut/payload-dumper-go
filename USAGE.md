@@ -26,6 +26,15 @@ The CLI interface maintains full backward compatibility with the original implem
 
 # Use multiple workers for faster extraction
 ./payload-dumper-go -c 8 payload.bin
+
+# Quiet mode (minimal output)
+./payload-dumper-go -q payload.bin
+
+# Machine-readable partition list (format: partition:size-in-KB)
+./payload-dumper-go -m -l payload.bin
+
+# Machine-readable extraction progress (format: partition:percentage)
+./payload-dumper-go -m payload.bin
 ```
 
 ### CLI Options
@@ -34,6 +43,8 @@ The CLI interface maintains full backward compatibility with the original implem
 - `-l, -list`: Show list of partitions without extracting
 - `-o, -output`: Set output directory
 - `-p, -partitions`: Extract only specified partitions (comma-separated)
+- `-q, -quiet`: Quiet mode - suppress non-essential output
+- `-m, -machine-readable`: Machine-readable output format
 
 ## Library Usage
 
@@ -71,7 +82,7 @@ func main() {
 }
 ```
 
-### Advanced Library Usage
+### Advanced Library Usage with Configuration
 
 ```go
 package main
@@ -128,11 +139,19 @@ func (b *MyProgressBar) SetTotal(total int64, complete bool) {
 func main() {
     reader := payload.New("payload.bin")
     
-    // Set custom logger
+    // Method 1: Individual setters (backward compatible)
     reader.SetLogger(&MyLogger{})
-    
-    // Set custom progress reporter
     reader.SetProgressReporter(&MyProgressReporter{})
+    reader.SetConcurrency(8)
+    
+    // Method 2: Using configuration object (recommended)
+    config := payload.DefaultConfig()
+    config.Concurrency = 8
+    config.QuietMode = false
+    config.MachineReadable = false
+    config.Logger = &MyLogger{}
+    config.ProgressReporter = &MyProgressReporter{}
+    reader.SetConfig(config)
     
     if err := reader.Open(); err != nil {
         log.Fatal(err)
@@ -150,12 +169,18 @@ func main() {
         fmt.Printf("  - %s (%d bytes)\n", p.Name, p.Size)
     }
     
-    // Configure extraction settings
-    reader.SetConcurrency(8)
+    // Method 3: Using ExtractWithOptions for maximum control
+    options := payload.ExtractOptions{
+        OutputDirectory:  "output",
+        Concurrency:      8,
+        SelectedParts:    []string{"boot", "system", "vendor"},
+        QuietMode:        false,
+        MachineReadable:  false,
+        Logger:           &MyLogger{},
+        ProgressReporter: &MyProgressReporter{},
+    }
     
-    // Extract specific partitions
-    selectedPartitions := []string{"boot", "system", "vendor"}
-    if err := reader.ExtractSelected("output", selectedPartitions); err != nil {
+    if err := reader.ExtractWithOptions(options); err != nil {
         log.Fatal(err)
     }
 }
@@ -248,3 +273,81 @@ The library provides detailed error messages for various failure scenarios:
 - Insufficient disk space
 
 All extraction operations include hash verification to ensure data integrity.
+
+## Machine-Readable Output
+
+For automation and scripting, payload-dumper-go supports machine-readable output:
+
+### Partition Listing
+
+```bash
+# Machine-readable partition list (format: partition:size-in-KB)
+./payload-dumper-go -m -l payload.bin
+```
+
+Output format: `partition_name:size_in_KB`
+```
+boot:32768
+system:2097152
+vendor:524288
+```
+
+### Extraction Progress
+
+```bash
+# Machine-readable extraction progress
+./payload-dumper-go -m payload.bin
+```
+
+Output format: `partition_name:percentage`
+```
+boot:10
+boot:20
+boot:30
+...
+boot:100
+system:5
+system:10
+...
+```
+
+### Quiet Mode
+
+Use quiet mode (`-q`) to suppress non-essential output while keeping error messages:
+
+```bash
+# Only show errors and essential information
+./payload-dumper-go -q payload.bin
+
+# Combine with machine-readable for pure parseable output
+./payload-dumper-go -m -q payload.bin
+```
+
+## Configuration API
+
+The library provides flexible configuration options:
+
+```go
+// Create configuration
+config := payload.DefaultConfig()
+config.Concurrency = 16           // Number of workers
+config.QuietMode = true           // Suppress non-essential logging
+config.MachineReadable = true     // Enable machine-readable output
+config.Logger = myLogger          // Custom logger
+config.ProgressReporter = myReporter // Custom progress reporter
+
+// Apply configuration
+reader.SetConfig(config)
+
+// Or use ExtractWithOptions for per-extraction control
+options := payload.ExtractOptions{
+    OutputDirectory:  "output",
+    Concurrency:      8,
+    SelectedParts:    []string{"boot", "system"},
+    QuietMode:        false,
+    MachineReadable:  true,
+    Logger:           myLogger,
+    ProgressReporter: myReporter,
+}
+reader.ExtractWithOptions(options)
+```
