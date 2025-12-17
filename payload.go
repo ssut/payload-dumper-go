@@ -30,7 +30,8 @@ type request struct {
 
 // Payload is a new format for the Android OTA/Firmware update files since Android Oreo
 type Payload struct {
-	Filename string
+	Filename      string
+	PayloadOffset int64 // NEW: offset of payload.bin within the file (0 for raw .bin, >0 for ZIP)
 
 	file                 *os.File
 	header               *payloadHeader
@@ -64,6 +65,10 @@ type payloadHeader struct {
 }
 
 func (ph *payloadHeader) ReadFromPayload() error {
+	if _, err := ph.payload.file.Seek(ph.payload.PayloadOffset, 0); err != nil {
+		return err
+	}
+
 	buf := make([]byte, 4)
 	if _, err := ph.payload.file.Read(buf); err != nil {
 		return err
@@ -105,11 +110,12 @@ func (ph *payloadHeader) ReadFromPayload() error {
 	return nil
 }
 
-// NewPayload creates a new Payload struct
-func NewPayload(filename string) *Payload {
+// creates a new Payload struct
+func NewPayload(filename string, payloadOffset int64) *Payload {
 	payload := &Payload{
-		Filename:    filename,
-		concurrency: 4,
+		Filename:      filename,
+		PayloadOffset: payloadOffset,
+		concurrency:   4,
 	}
 
 	return payload
@@ -150,7 +156,8 @@ func (p *Payload) readManifest() (*chromeos_update_engine.DeltaArchiveManifest, 
 }
 
 func (p *Payload) readMetadataSignature() (*chromeos_update_engine.Signatures, error) {
-	if _, err := p.file.Seek(int64(p.header.Size+p.header.ManifestLen), 0); err != nil {
+	// Seek relative to PayloadOffset
+	if _, err := p.file.Seek(p.PayloadOffset+int64(p.header.Size+p.header.ManifestLen), 0); err != nil {
 		return nil, err
 	}
 
@@ -210,7 +217,9 @@ func (p *Payload) Init() error {
 
 func (p *Payload) readDataBlob(offset int64, length int64) ([]byte, error) {
 	buf := make([]byte, length)
-	n, err := p.file.ReadAt(buf, p.dataOffset+offset)
+	// Add PayloadOffset to account for ZIP offset
+	absoluteOffset := p.PayloadOffset + p.dataOffset + offset
+	n, err := p.file.ReadAt(buf, absoluteOffset)
 	if err != nil {
 		return nil, err
 	}
@@ -244,7 +253,8 @@ func (p *Payload) Extract(partition *chromeos_update_engine.PartitionUpdate, out
 		bar.Increment()
 
 		e := operation.DstExtents[0]
-		dataOffset := p.dataOffset + int64(operation.GetDataOffset())
+		// Add PayloadOffset to account for ZIP offset
+		dataOffset := p.PayloadOffset + p.dataOffset + int64(operation.GetDataOffset())
 		dataLength := int64(operation.GetDataLength())
 		_, err := out.Seek(int64(e.GetStartBlock())*blockSize, 0)
 		if err != nil {
