@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"flag"
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"runtime"
@@ -12,36 +11,29 @@ import (
 	"time"
 )
 
-func extractPayloadBin(filename string) string {
+func findPayloadBinOffset(filename string) (string, int64, error) {
 	zipReader, err := zip.OpenReader(filename)
 	if err != nil {
-		log.Fatalf("Not a valid zip archive: %s\n", filename)
+		return "", 0, fmt.Errorf("not a valid zip archive: %s", filename)
 	}
 	defer zipReader.Close()
 
 	for _, file := range zipReader.Reader.File {
 		if file.Name == "payload.bin" && file.UncompressedSize64 > 0 {
-			zippedFile, err := file.Open()
-			if err != nil {
-				log.Fatalf("Failed to read zipped file: %s\n", file.Name)
+			if file.Method != zip.Store {
+				return "", 0, fmt.Errorf("payload.bin is compressed (method %d), expected STORE (0)", file.Method)
 			}
 
-			tempfile, err := os.CreateTemp(os.TempDir(), "payload_*.bin")
+			offset, err := file.DataOffset()
 			if err != nil {
-				log.Fatalf("Failed to create a temp file located at %s\n", tempfile.Name())
-			}
-			defer tempfile.Close()
-
-			_, err = io.Copy(tempfile, zippedFile)
-			if err != nil {
-				log.Fatal(err)
+				return "", 0, fmt.Errorf("failed to get data offset: %w", err)
 			}
 
-			return tempfile.Name()
+			return filename, offset, nil
 		}
 	}
 
-	return ""
+	return "", 0, fmt.Errorf("payload.bin not found in ZIP")
 }
 
 func main() {
@@ -73,19 +65,23 @@ func main() {
 		log.Fatalf("File does not exist: %s\n", filename)
 	}
 
-	payloadBin := filename
+	payloadFile := filename
+	payloadOffset := int64(0)
+	
 	if strings.HasSuffix(filename, ".zip") {
-		fmt.Println("Please wait while extracting payload.bin from the archive.")
-		payloadBin = extractPayloadBin(filename)
-		if payloadBin == "" {
-			log.Fatal("Failed to extract payload.bin from the archive.")
-		} else {
-			defer os.Remove(payloadBin)
+		fmt.Println("Locating payload.bin in ZIP archive...")
+		zipFile, offset, err := findPayloadBinOffset(filename)
+		if err != nil {
+			log.Fatalf("Failed to locate payload.bin: %v\n", err)
 		}
+		payloadFile = zipFile
+		payloadOffset = offset
+		fmt.Printf("Found payload.bin at offset: %d\n", offset)
 	}
-	fmt.Printf("payload.bin: %s\n", payloadBin)
+	
+	fmt.Printf("payload file: %s (offset: %d)\n", payloadFile, payloadOffset)
 
-	payload := NewPayload(payloadBin)
+	payload := NewPayload(payloadFile, payloadOffset)
 	if err := payload.Open(); err != nil {
 		log.Fatal(err)
 	}
