@@ -37,12 +37,17 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          dnf -y install autoconf bash clang cmake gettext-devel git glibc-{devel,static}.{i686,x86_64} golang libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
+          dnf -y install autoconf bash clang cmake gettext-devel git glibc-{devel,static}.{i686,x86_64} libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
           dnf -y install 'dnf-command(download)'
           dnf download --source xz-devel
           rpm -ivh *.src.rpm
           rm -f *.src.rpm
-
+          
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.26'
+      
       - name: Setup cross compile environment for Linux ARMv7
         env:
           CC: arm-linux-gnueabi-gcc
