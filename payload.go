@@ -109,7 +109,7 @@ func (ph *payloadHeader) ReadFromPayload() error {
 func NewPayload(filename string) *Payload {
 	payload := &Payload{
 		Filename:    filename,
-		concurrency: 4,
+		concurrency: runtime.NumCPU(),  
 	}
 
 	return payload
