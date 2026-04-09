@@ -13,6 +13,7 @@ import (
 	"sort"
 	"sync"
 	"github.com/valyala/gozstd"
+	"runtime"
 
 	humanize "github.com/dustin/go-humanize"
 	xz "github.com/spencercw/go-xz"
