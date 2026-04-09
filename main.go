@@ -2,7 +2,6 @@ package main
 
 import (
 	"archive/zip"
-	"flag"
 	"fmt"
 	"io"
 	"log"
@@ -10,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	flag "github.com/spf13/pflag"
 )
 
 func extractPayloadBin(filename string) string {
@@ -54,14 +54,16 @@ func main() {
 		concurrency     int
 	)
 
-	flag.IntVar(&concurrency, "c", runtime.NumCPU(), "Number of multiple workers to extract (shorthand)")  
-	flag.IntVar(&concurrency, "concurrency", runtime.NumCPU(), "Number of multiple workers to extract")
-	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
-	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
-	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
-	flag.StringVar(&outputDirectory, "output", "", "Set output directory")
-	flag.StringVar(&partitions, "p", "", "Dump only selected partitions (comma-separated) (shorthand)")
-	flag.StringVar(&partitions, "partitions", "", "Dump only selected partitions (comma-separated)")
+	flag.IntVarP(&concurrency, "concurrency", "c", runtime.NumCPU(),"Number of concurrent workers, default using max CPU cores")
+	flag.BoolVarP(&list, "list", "l", false,"Show list of partitions in payload.bin")
+	flag.StringVarP(&outputDirectory, "output", "o", "","Set output directory")
+	flag.StringVarP(&partitions, "partitions", "p", "","Dump only selected partitions (comma-separated)")
+
+	flag.Usage = func() {
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage of %s:\n", "payload-dumper-go")
+		flag.PrintDefaults()
+	}
+
 	flag.Parse()
 
 	if flag.NArg() == 0 {
