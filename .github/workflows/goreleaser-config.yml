@@ -1,0 +1,82 @@
+project_name: payload-dumper-go
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: default
+    main: .
+    binary: payload-dumper-go
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+      - arm
+    goarm:
+      - 7
+    ignore:
+      - goos: windows
+        goarch: arm64
+      - goos: windows
+        goarch: arm
+      - goos: darwin
+        goarch: arm
+    env:
+      - CGO_ENABLED=1
+
+  - id: amd64_v3
+    main: .
+    binary: payload-dumper-go-v3
+    ldflags:
+      - -s -w
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+    env:
+      - GOAMD64=v3
+      - CGO_ENABLED=1
+
+archives:
+  - id: default
+    builds: [default]
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}"
+    files:
+      - README.md
+      - LICENSE*
+
+  - id: v3
+    builds: [amd64_v3]
+    format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Os }}_amd64_v3"
+    files:
+      - README.md
+      - LICENSE*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    name: payload-dumper-go
+  draft: false
+  prerelease: auto
