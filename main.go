@@ -54,8 +54,8 @@ func main() {
 		concurrency     int
 	)
 
-	flag.IntVar(&concurrency, "c", 4, "Number of multiple workers to extract (shorthand)")
-	flag.IntVar(&concurrency, "concurrency", 4, "Number of multiple workers to extract")
+	flag.IntVar(&concurrency, "c", runtime.NumCPU(), "Number of multiple workers to extract (shorthand)")  
+	flag.IntVar(&concurrency, "concurrency", runtime.NumCPU(), "Number of multiple workers to extract")
 	flag.BoolVar(&list, "l", false, "Show list of partitions in payload.bin (shorthand)")
 	flag.BoolVar(&list, "list", false, "Show list of partitions in payload.bin")
 	flag.StringVar(&outputDirectory, "o", "", "Set output directory (shorthand)")
