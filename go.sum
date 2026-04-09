@@ -14,6 +14,8 @@ github.com/mattn/go-runewidth v0.0.23 h1:7ykA0T0jkPpzSvMS5i9uoNn2Xy3R383f9HDx3Ry
 github.com/mattn/go-runewidth v0.0.23/go.mod h1:XBkDxAl56ILZc9knddidhrOlY5R/pDhgLpndooCuJAs=
 github.com/spencercw/go-xz v0.0.0-20181128201811-c82a2123b492 h1:8J9q7E8tGpVB84cBsMr+X160ECRqwYhkZ6KeaY9kN1I=
 github.com/spencercw/go-xz v0.0.0-20181128201811-c82a2123b492/go.mod h1:EvRrgz1GcjNV5yfN+ISxA4sxn255MimeGQ/ROJnQPtQ=
+github.com/spf13/pflag v1.0.10 h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=
+github.com/spf13/pflag v1.0.10/go.mod h1:McXfInJRrz4CZXVZOBLb0bTZqETkiAhM9Iw0y3An2Bg=
 github.com/valyala/gozstd v1.24.0 h1:M/9L3h7bVwbj2gZwrmuoaxzwVrmBUvos2jG9cZtuhlc=
 github.com/valyala/gozstd v1.24.0/go.mod h1:y5Ew47GLlP37EkTB+B4s7r6A5rdaeB7ftbl9zoYiIPQ=
 github.com/vbauerster/mpb/v5 v5.4.0 h1:n8JPunifvQvh6P1D1HAl2Ur9YcmKT1tpoUuiea5mlmg=
