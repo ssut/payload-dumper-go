@@ -20,7 +20,10 @@ jobs:
         run: |
           git clone https://github.com/tpoechtrager/osxcross osxcross
           pushd osxcross
-          XCODEDIR=/Applications/Xcode_16.0.app tools/gen_sdk_package.sh
+          XCODEDIR=$(ls -d /Applications/Xcode_16*.app 2>/dev/null | sort -V | tail -1)
+          [ -n "$XCODEDIR" ] || XCODEDIR=$(ls -d /Applications/Xcode*.app | sort -V | tail -1)
+          echo "Using XCODEDIR=$XCODEDIR"
+          XCODEDIR=$XCODEDIR tools/gen_sdk_package.sh
           mv MacOSX*.sdk.tar.xz tarballs/
           popd
 
@@ -99,7 +102,10 @@ jobs:
 
       - name: Build osxcross
         if: steps.osxcross-target.outputs.cache-hit != 'true'
-        run: UNATTENDED=1 SDK_VERSION=15.0 ./build.sh
+        run: |
+          SDK_VERSION=$(basename /osxcross/tarballs/MacOSX*.sdk.tar.* | sed -E 's/^MacOSX([0-9]+(\.[0-9]+)?)\.sdk\.tar\..*$/\1/')
+          echo "Using SDK_VERSION=$SDK_VERSION"
+          UNATTENDED=1 SDK_VERSION=$SDK_VERSION ./build.sh
         working-directory: /osxcross
 
       - name: Setup cross compile environment for Darwin AMD64
