@@ -113,12 +113,14 @@ jobs:
           CC: o64-clang
           CXX: o64-clang++
         run: |
+          DARWIN_HOST=$(basename "$(ls /osxcross/target/bin/x86_64-apple-darwin*-ar | head -1)" -ar)
+          echo "Using host triple $DARWIN_HOST"
           mkdir /darwin-amd64-buildroot
           pushd /darwin-amd64-buildroot
           tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
           pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=x86_64-apple-darwin24 --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH AR=$DARWIN_HOST-ar RANLIB=$DARWIN_HOST-ranlib ./configure --host=$DARWIN_HOST --prefix=/darwin-amd64-buildroot/sys-root --enable-shared=no --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-doc
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
@@ -128,12 +130,16 @@ jobs:
           CC: oa64-clang
           CXX: oa64-clang++
         run: |
+          AR_BIN=$(ls /osxcross/target/bin/aarch64-apple-darwin*-ar 2>/dev/null | head -1)
+          [ -n "$AR_BIN" ] || AR_BIN=$(ls /osxcross/target/bin/arm64-apple-darwin*-ar | head -1)
+          DARWIN_HOST=$(basename "$AR_BIN" -ar)
+          echo "Using host triple $DARWIN_HOST"
           mkdir /darwin-aarch64-buildroot
           pushd /darwin-aarch64-buildroot
           tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
           pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
           PATH=/osxcross/target/bin:$PATH ./autogen.sh
-          PATH=/osxcross/target/bin:$PATH ./configure --host=aarch64-apple-darwin24 --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no
+          PATH=/osxcross/target/bin:$PATH AR=$DARWIN_HOST-ar RANLIB=$DARWIN_HOST-ranlib ./configure --host=$DARWIN_HOST --prefix=/darwin-aarch64-buildroot/sys-root --enable-shared=no --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-doc
           PATH=/osxcross/target/bin:$PATH make -j$(nproc) install
           popd
           popd
