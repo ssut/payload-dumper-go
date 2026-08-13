@@ -36,6 +36,8 @@ jobs:
     runs-on: ubuntu-latest
     container: fedora:41
     needs: macos-sdk
+    env:
+      GOTOOLCHAIN: auto
 
     steps:
       - name: Install dependencies
@@ -165,6 +167,8 @@ jobs:
           fi
 
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Add $GITHUB_WORKSPACE to git safe.directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
