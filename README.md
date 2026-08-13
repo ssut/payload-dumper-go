@@ -9,8 +9,10 @@ An android OTA payload dumper written in Go.
 See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-inch 2019 i9-9750H, 16G)
 
 - Incredibly fast decompression. All decompression progresses are executed in parallel.
-- Payload checksum verification.
-- Support original zip package that contains payload.bin.
+- Incremental OTA (delta) payload support. Applied on top of the base images (`-old`), bit-exact output.
+- Verifies everything: operation data, source images, and final images (sha256). Fails loudly with a non-zero exit code.
+- Support original zip package that contains payload.bin, read in place without a temp copy.
+- Usable as a Go library. (`github.com/ssut/payload-dumper-go/payload`)
 
 ### Cautions
 
@@ -19,7 +21,7 @@ See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-
 
 ### Limitations
 
-- Incremental OTA (delta) payload is not supported yet. ([#44](https://github.com/ssut/payload-dumper-go/pull/44))
+- `PUFFDIFF`, `ZUCCHINI` and `LZ4DIFF_*` delta operations are not supported yet. Affected partitions (usually only `system`/`product`/`system_ext`) fail with a clear error; extract the rest with `-p`.
 
 ## Installation
 
@@ -64,6 +66,43 @@ Run the following command in your terminal:
 
 ```
 payload-dumper-go /path/to/payload.bin
+```
+
+The input can be a raw `payload.bin` or an OTA zip, detected by content.
+
+```
+Options:
+  -c, -concurrency       Number of workers to extract concurrently (default: number of CPUs)
+  -l, -list              Show list of partitions in payload.bin
+  -o, -output            Set output directory
+  -p, -partitions        Dump only selected partitions (comma-separated)
+  -old                   Directory with base images, required for incremental OTA
+  -q, -quiet             Quiet mode - suppress non-essential output
+  -m, -machine-readable  Machine-readable output format
+  -no-verify             Skip sha256 verification
+```
+
+### Incremental (delta) OTA
+
+Extract the base (previous) full OTA first, then pass it via `-old`:
+
+```
+payload-dumper-go -o base_images base_full_ota.zip
+payload-dumper-go -old base_images -o new_images incremental_ota.zip
+```
+
+### Library usage
+
+```go
+import "github.com/ssut/payload-dumper-go/payload"
+
+p, _ := payload.Open("ota.zip")
+defer p.Close()
+
+err := p.Extract(context.Background(), payload.ExtractOptions{
+    OutputDir: "out",
+    SourceDir: "base_images",
+})
 ```
 
 ## Performance
