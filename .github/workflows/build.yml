@@ -17,5 +17,8 @@ jobs:
       - name: Build
         run: go build .
 
+      - name: Build amd64 v3
+        run: GOAMD64=v3 go build -o payload-dumper-go.v3 .
+
       - name: Test
         run: go test ./...

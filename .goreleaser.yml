@@ -15,6 +15,9 @@ builds:
       - windows
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-windows-arm64
@@ -35,6 +38,9 @@ builds:
       - linux
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-linux-armv7
@@ -74,6 +80,9 @@ builds:
       - darwin
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
   - id: build-darwin-arm64
     env:
       - CC=oa64-clang
