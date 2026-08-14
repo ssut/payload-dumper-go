@@ -84,9 +84,6 @@ jobs:
           path: /llvm-mingw
           key: llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
 
-      - name: Add llvm-mingw to PATH
-        run: echo /llvm-mingw/bin >> "$GITHUB_PATH"
-
       - id: buildroots-cache
         uses: actions/cache/restore@v6
         with:

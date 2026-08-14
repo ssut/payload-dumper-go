@@ -9,8 +9,8 @@ env:
 builds:
   - id: build-windows-amd64
     env:
-      - CC=x86_64-w64-mingw32-gcc
-      - CXX=x86_64-w64-mingw32-g++
+      - CC=/usr/bin/x86_64-w64-mingw32-gcc
+      - CXX=/usr/bin/x86_64-w64-mingw32-g++
     goos:
       - windows
     goarch:
