@@ -1,0 +1,118 @@
+name: windows-arm64
+
+on:
+  pull_request:
+    paths:
+      - ".goreleaser.yml"
+      - ".github/workflows/goreleaser.yml"
+      - ".github/workflows/windows-arm64.yml"
+      - "scripts/prepare-gozstd-windows-arm64.sh"
+      - "go.mod"
+      - "go.sum"
+      - "**/*.go"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: fedora:41
+    env:
+      GOTOOLCHAIN: auto
+      GOPROXY: https://proxy.golang.org,direct
+      GOSUMDB: sum.golang.org
+
+    steps:
+      - name: Install dependencies
+        run: dnf -y install aria2 autoconf automake file gettext-devel git golang libtool make
+
+      - uses: actions/checkout@v7
+
+      - name: Add $GITHUB_WORKSPACE to git safe.directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - id: llvm-mingw-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: /llvm-mingw
+          key: llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
+
+      - name: Install llvm-mingw
+        if: steps.llvm-mingw-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "level=info msg=\"downloading llvm-mingw\" version=20260616"
+          mkdir -p /tmp/llvm-mingw-dl /llvm-mingw
+          aria2c -x 16 -s 16 -d /tmp/llvm-mingw-dl -o llvm-mingw.tar.xz \
+            https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xJf /tmp/llvm-mingw-dl/llvm-mingw.tar.xz -C /tmp/llvm-mingw-dl
+          src=$(echo /tmp/llvm-mingw-dl/llvm-mingw-*)
+          cp -a "$src"/. /llvm-mingw/
+          rm -rf /tmp/llvm-mingw-dl
+          echo "level=info msg=\"installed llvm-mingw\" prefix=/llvm-mingw"
+
+      - uses: actions/cache/save@v6
+        if: always() && steps.llvm-mingw-cache.outputs.cache-hit != 'true'
+        with:
+          path: /llvm-mingw
+          key: llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
+
+      - id: sysroot-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: /windows-arm64-buildroot/sys-root
+          key: ${{ runner.os }}-windows-arm64-sysroot-xz-5.6.4-zstd-1.5.7
+
+      - name: Build Windows ARM64 sysroot
+        env:
+          CC: aarch64-w64-mingw32-gcc
+          CXX: aarch64-w64-mingw32-g++
+          WINDOWS_ARM64_SYSROOT: /windows-arm64-buildroot/sys-root
+        run: |
+          export PATH=/llvm-mingw/bin:$PATH
+          echo "level=info msg=\"checking llvm-mingw compiler\" cc=$(command -v "$CC")"
+          "$CC" --version
+          if [ ! -f /windows-arm64-buildroot/sys-root/lib/liblzma.a ]; then
+            echo "level=info msg=\"building liblzma for windows/arm64\" version=5.6.4"
+            mkdir -p /tmp/xz-dl /windows-arm64-buildroot
+            aria2c -x 16 -s 16 -d /tmp/xz-dl -o xz.tar.gz \
+              https://github.com/tukaani-project/xz/releases/download/v5.6.4/xz-5.6.4.tar.gz
+            tar -xzf /tmp/xz-dl/xz.tar.gz -C /tmp/xz-dl
+            pushd /tmp/xz-dl/xz-5.6.4
+            ./configure --host=aarch64-w64-mingw32 --prefix=/windows-arm64-buildroot/sys-root --enable-shared=no --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-doc
+            make -j"$(nproc)" install
+            popd
+            rm -rf /tmp/xz-dl
+          fi
+          chmod +x scripts/prepare-gozstd-windows-arm64.sh
+          ./scripts/prepare-gozstd-windows-arm64.sh
+
+      - uses: actions/cache/save@v6
+        if: always() && steps.sysroot-cache.outputs.cache-hit != 'true'
+        with:
+          path: /windows-arm64-buildroot/sys-root
+          key: ${{ runner.os }}-windows-arm64-sysroot-xz-5.6.4-zstd-1.5.7
+
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: build --id build-windows-arm64 --snapshot --clean --skip=validate
+        env:
+          PATH: /llvm-mingw/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+      - name: Verify Windows ARM64 binary
+        run: |
+          binary=$(find dist -type f -name '*.exe' | head -1)
+          if [ -z "$binary" ]; then
+            echo "level=error msg=\"windows/arm64 exe missing\" dir=dist"
+            find dist -type f -print || true
+            exit 1
+          fi
+          echo "level=info msg=\"windows/arm64 binary ready\" path=$binary"
+          file "$binary"
+          ls -lh "$binary"
+          echo "$binary" | grep -q arm64
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: payload-dumper-go-windows-arm64
+          path: dist/
+          if-no-files-found: error

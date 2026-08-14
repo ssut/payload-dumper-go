@@ -17,6 +17,19 @@ builds:
       - amd64
     ldflags:
       - '-extldflags "-static -s -w"'
+  - id: build-windows-arm64
+    env:
+      - CC=aarch64-w64-mingw32-gcc
+      - CXX=aarch64-w64-mingw32-g++
+      - CGO_CFLAGS=-I/windows-arm64-buildroot/sys-root/include
+      - 'CGO_LDFLAGS=-L/windows-arm64-buildroot/sys-root/lib -lzstd'
+      - PATH=/llvm-mingw/bin:$PATH
+    goos:
+      - windows
+    goarch:
+      - arm64
+    ldflags:
+      - '-extldflags "-static -s -w"'
   - id: build-linux-amd64
     goos:
       - linux
