@@ -335,13 +335,13 @@ jobs:
                 ;;
             esac
           fi
-          v3=$(find dist -type f \( -name '*amd64v3*' -o -name '*amd64_v3*' \) ! -name '*.json' | head -1)
-          if [ -z "$v3" ]; then
-            echo "level=error msg=\"amd64 v3 artifact missing\" dir=dist"
+          avx2=$(find dist -type f -name '*amd64_avx2*' ! -name '*.json' | head -1)
+          if [ -z "$avx2" ]; then
+            echo "level=error msg=\"amd64 avx2 artifact missing\" dir=dist"
             missing=1
           else
-            echo "level=info msg=\"amd64 v3 artifact ready\" path=$v3"
-            ls -lh "$v3"
+            echo "level=info msg=\"amd64 avx2 artifact ready\" path=$avx2"
+            ls -lh "$avx2"
           fi
           if [ "$missing" -ne 0 ]; then
             exit 1

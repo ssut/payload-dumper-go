@@ -2,6 +2,8 @@ version: 2
 checksum:
   name_template: "{{ .ProjectName }}_sha256checksums.txt"
   algorithm: sha256
+archives:
+  - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ if eq .Amd64 "v3" }}_avx2{{ end }}'
 release:
   prerelease: auto
 env:
