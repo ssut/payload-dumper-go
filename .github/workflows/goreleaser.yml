@@ -296,30 +296,62 @@ jobs:
           chmod +x scripts/prepare-gozstd-windows-arm64.sh
           ./scripts/prepare-gozstd-windows-arm64.sh
 
+      - id: goreleaser-args
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" != "true" ]; then
+            echo "args=release --clean --snapshot --skip=publish" >> "$GITHUB_OUTPUT"
+            echo "level=info msg=\"goreleaser dry run\" publish=false"
+          else
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+            echo "level=info msg=\"goreleaser publish run\" event=${{ github.event_name }}"
+          fi
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
-          args: >-
-            release --clean
-            ${{ github.event_name == 'workflow_dispatch' && inputs.publish != true && '--snapshot --skip=publish' || '' }}
+          args: ${{ steps.goreleaser-args.outputs.args }}
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
-      - name: Verify Windows ARM64 artifact
+      - name: Verify release artifacts
         run: |
-          artifact=$(find dist -type f \( -name '*windows_arm64*' -o -name '*windows-arm64*' \) ! -name '*.json' | head -1)
-          if [ -z "$artifact" ]; then
+          echo "level=info msg=\"listing dist artifacts\""
+          find dist -type f -print | sort
+          missing=0
+          winarm=$(find dist -type f \( -name '*windows_arm64*' -o -name '*windows-arm64*' \) ! -name '*.json' | head -1)
+          if [ -z "$winarm" ]; then
             echo "level=error msg=\"windows/arm64 artifact missing\" dir=dist"
-            ls -la dist || true
-            find dist -type f -print || true
+            missing=1
+          else
+            echo "level=info msg=\"windows/arm64 artifact ready\" path=$winarm"
+            file "$winarm" || true
+            ls -lh "$winarm"
+            case "$winarm" in
+              *.tar.gz|*.tgz)
+                inner=$(tar -tzf "$winarm" | grep -E '\.exe$' | head -1 || true)
+                if [ -n "$inner" ]; then
+                  tmp=$(mktemp -d)
+                  tar -xzf "$winarm" -C "$tmp" "$inner"
+                  echo "level=info msg=\"windows/arm64 binary type\" path=$inner type=$(file -b "$tmp/$inner")"
+                  echo "$(file -b "$tmp/$inner")" | grep -qi 'aarch64\|arm64\|aa64'
+                fi
+                ;;
+            esac
+          fi
+          v3=$(find dist -type f \( -name '*amd64v3*' -o -name '*amd64_v3*' \) ! -name '*.json' | head -1)
+          if [ -z "$v3" ]; then
+            echo "level=error msg=\"amd64 v3 artifact missing\" dir=dist"
+            missing=1
+          else
+            echo "level=info msg=\"amd64 v3 artifact ready\" path=$v3"
+            ls -lh "$v3"
+          fi
+          if [ "$missing" -ne 0 ]; then
             exit 1
           fi
-          echo "level=info msg=\"windows/arm64 artifact ready\" path=$artifact"
-          file "$artifact" || true
-          ls -lh "$artifact"
 
       - uses: actions/upload-artifact@v7
-        if: github.event_name == 'workflow_dispatch' && inputs.publish != true
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'true'
         with:
           name: dist
           path: dist/
