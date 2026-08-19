@@ -2,6 +2,8 @@ version: 2
 checksum:
   name_template: "{{ .ProjectName }}_sha256checksums.txt"
   algorithm: sha256
+archives:
+  - name_template: '{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ with .Arm }}v{{ . }}{{ end }}{{ if eq .Amd64 "v3" }}_avx2{{ end }}'
 release:
   prerelease: auto
 env:
@@ -9,12 +11,28 @@ env:
 builds:
   - id: build-windows-amd64
     env:
-      - CC=x86_64-w64-mingw32-gcc
-      - CXX=x86_64-w64-mingw32-g++
+      - CC=/usr/bin/x86_64-w64-mingw32-gcc
+      - CXX=/usr/bin/x86_64-w64-mingw32-g++
     goos:
       - windows
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
+    ldflags:
+      - '-extldflags "-static -s -w"'
+  - id: build-windows-arm64
+    env:
+      - CC=aarch64-w64-mingw32-gcc
+      - CXX=aarch64-w64-mingw32-g++
+      - CGO_CFLAGS=-I/windows-arm64-buildroot/sys-root/include
+      - 'CGO_LDFLAGS=-L/windows-arm64-buildroot/sys-root/lib -lzstd'
+      - PATH=/llvm-mingw/bin:$PATH
+    goos:
+      - windows
+    goarch:
+      - arm64
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-linux-amd64
@@ -22,6 +40,9 @@ builds:
       - linux
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
     ldflags:
       - '-extldflags "-static -s -w"'
   - id: build-linux-armv7
@@ -61,6 +82,9 @@ builds:
       - darwin
     goarch:
       - amd64
+    goamd64:
+      - v1
+      - v3
   - id: build-darwin-arm64
     env:
       - CC=oa64-clang

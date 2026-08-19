@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Create a GitHub Release. Leave off to build artifacts only."
+        type: boolean
+        default: false
 
 jobs:
   macos-sdk:
@@ -44,7 +50,7 @@ jobs:
     steps:
       - name: Install dependencies
         run: |
-          dnf -y install autoconf bash clang cmake gettext-devel git glibc-{devel,static}.{i686,x86_64} golang libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
+          dnf -y install aria2 autoconf bash clang cmake file gettext-devel git glibc-{devel,static}.{i686,x86_64} golang libstdc++-static libtool libuuid-devel libxml2-devel llvm-devel make mingw{32,64}-{winpthreads,xz-libs}-static mingw{32,64}-gcc{-c++,} openssl-devel patch po4a xz-{devel,static}.{i686,x86_64}
           dnf -y install 'dnf-command(download)'
           dnf download --source xz-devel
           rpm -ivh *.src.rpm
@@ -52,6 +58,31 @@ jobs:
 
       - id: xz-version
         run: echo "version=$(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)" >> "$GITHUB_OUTPUT"
+
+      - id: llvm-mingw-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: /llvm-mingw
+          key: llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
+
+      - name: Install llvm-mingw
+        if: steps.llvm-mingw-cache.outputs.cache-hit != 'true'
+        run: |
+          echo "level=info msg=\"downloading llvm-mingw\" version=20260616"
+          mkdir -p /tmp/llvm-mingw-dl /llvm-mingw
+          aria2c -x 16 -s 16 -d /tmp/llvm-mingw-dl -o llvm-mingw.tar.xz \
+            https://github.com/mstorsjo/llvm-mingw/releases/download/20260616/llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64.tar.xz
+          tar -xJf /tmp/llvm-mingw-dl/llvm-mingw.tar.xz -C /tmp/llvm-mingw-dl
+          src=$(echo /tmp/llvm-mingw-dl/llvm-mingw-*)
+          cp -a "$src"/. /llvm-mingw/
+          rm -rf /tmp/llvm-mingw-dl
+          echo "level=info msg=\"installed llvm-mingw\" prefix=/llvm-mingw"
+
+      - uses: actions/cache/save@v6
+        if: always() && steps.llvm-mingw-cache.outputs.cache-hit != 'true'
+        with:
+          path: /llvm-mingw
+          key: llvm-mingw-20260616-ucrt-ubuntu-22.04-x86_64
 
       - id: buildroots-cache
         uses: actions/cache/restore@v6
@@ -61,7 +92,8 @@ jobs:
             /linux-aarch64-buildroot/sys-root
             /darwin-amd64-buildroot/sys-root
             /darwin-aarch64-buildroot/sys-root
-          key: ${{ runner.os }}-buildroots-${{ steps.xz-version.outputs.version }}
+            /windows-arm64-buildroot/sys-root
+          key: ${{ runner.os }}-buildroots-${{ steps.xz-version.outputs.version }}-winarm64
 
       - name: Setup cross compile environment for Linux ARMv7
         env:
@@ -175,6 +207,53 @@ jobs:
             popd
           fi
 
+      - name: Setup cross compile environment for Windows ARM64
+        env:
+          CC: aarch64-w64-mingw32-gcc
+          CXX: aarch64-w64-mingw32-g++
+        run: |
+          export PATH=/llvm-mingw/bin:$PATH
+          echo "level=info msg=\"checking llvm-mingw compiler\" cc=$(command -v "$CC")"
+          "$CC" --version
+          if [ ! -f /windows-arm64-buildroot/sys-root/lib/liblzma.a ]; then
+            echo "level=info msg=\"building liblzma for windows/arm64\""
+            mkdir -p /windows-arm64-buildroot
+            pushd /windows-arm64-buildroot
+            tar -xvf $HOME/rpmbuild/SOURCES/xz-*.tar.gz
+            pushd $(basename $HOME/rpmbuild/SOURCES/xz-*.tar.gz .tar.gz)
+            ./autogen.sh
+            ./configure --host=aarch64-w64-mingw32 --prefix=/windows-arm64-buildroot/sys-root --enable-shared=no --disable-xz --disable-xzdec --disable-lzmadec --disable-lzmainfo --disable-scripts --disable-doc
+            make -j$(nproc) install
+            popd
+            popd
+            echo "level=info msg=\"installed liblzma\" prefix=/windows-arm64-buildroot/sys-root"
+          else
+            echo "level=info msg=\"reusing cached liblzma\" prefix=/windows-arm64-buildroot/sys-root"
+          fi
+          if [ ! -f /windows-arm64-buildroot/sys-root/lib/libzstd.a ]; then
+            echo "level=info msg=\"building libzstd for windows/arm64\" version=1.5.7"
+            mkdir -p /tmp/zstd-dl /windows-arm64-buildroot/sys-root/lib
+            aria2c -x 16 -s 16 -d /tmp/zstd-dl -o zstd.tar.gz \
+              https://github.com/facebook/zstd/releases/download/v1.5.7/zstd-1.5.7.tar.gz
+            tar -xzf /tmp/zstd-dl/zstd.tar.gz -C /tmp/zstd-dl
+            make -C /tmp/zstd-dl/zstd-1.5.7/lib \
+              CC=aarch64-w64-mingw32-gcc \
+              AR=aarch64-w64-mingw32-ar \
+              RANLIB=aarch64-w64-mingw32-ranlib \
+              TARGET_SYSTEM=Windows \
+              OS=Windows_NT \
+              UNAME=Windows \
+              UNAME_TARGET_SYSTEM=Windows \
+              ZSTD_LEGACY_SUPPORT=0 \
+              ZSTD_NO_ASM=1 \
+              libzstd.a
+            cp -f /tmp/zstd-dl/zstd-1.5.7/lib/libzstd.a /windows-arm64-buildroot/sys-root/lib/libzstd.a
+            rm -rf /tmp/zstd-dl
+            echo "level=info msg=\"installed libzstd\" path=/windows-arm64-buildroot/sys-root/lib/libzstd.a"
+          else
+            echo "level=info msg=\"reusing cached libzstd\" path=/windows-arm64-buildroot/sys-root/lib/libzstd.a"
+          fi
+
       - uses: actions/cache/save@v6
         if: always() && steps.buildroots-cache.outputs.cache-hit != 'true'
         with:
@@ -183,7 +262,8 @@ jobs:
             /linux-aarch64-buildroot/sys-root
             /darwin-amd64-buildroot/sys-root
             /darwin-aarch64-buildroot/sys-root
-          key: ${{ runner.os }}-buildroots-${{ steps.xz-version.outputs.version }}
+            /windows-arm64-buildroot/sys-root
+          key: ${{ runner.os }}-buildroots-${{ steps.xz-version.outputs.version }}-winarm64
 
       - uses: actions/checkout@v7
         with:
@@ -202,12 +282,76 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-go-
 
+      - name: Ensure windows/arm64 libzstd
+        env:
+          CC: aarch64-w64-mingw32-gcc
+          AR: aarch64-w64-mingw32-ar
+          RANLIB: aarch64-w64-mingw32-ranlib
+          WINDOWS_ARM64_SYSROOT: /windows-arm64-buildroot/sys-root
+        run: |
+          export PATH=/llvm-mingw/bin:$PATH
+          chmod +x scripts/prepare-gozstd-windows-arm64.sh
+          ./scripts/prepare-gozstd-windows-arm64.sh
+
+      - id: goreleaser-args
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.publish }}" != "true" ]; then
+            echo "args=release --clean --snapshot --skip=publish" >> "$GITHUB_OUTPUT"
+            echo "level=info msg=\"goreleaser dry run\" publish=false"
+          else
+            echo "args=release --clean" >> "$GITHUB_OUTPUT"
+            echo "level=info msg=\"goreleaser publish run\" event=${{ github.event_name }}"
+          fi
+
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: latest
-          args: release --clean
+          args: ${{ steps.goreleaser-args.outputs.args }}
         env:
           GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Verify release artifacts
+        run: |
+          echo "level=info msg=\"listing dist artifacts\""
+          find dist -type f -print | sort
+          missing=0
+          winarm=$(find dist -type f \( -name '*windows_arm64*' -o -name '*windows-arm64*' \) ! -name '*.json' | head -1)
+          if [ -z "$winarm" ]; then
+            echo "level=error msg=\"windows/arm64 artifact missing\" dir=dist"
+            missing=1
+          else
+            echo "level=info msg=\"windows/arm64 artifact ready\" path=$winarm"
+            file "$winarm" || true
+            ls -lh "$winarm"
+            case "$winarm" in
+              *.tar.gz|*.tgz)
+                inner=$(tar -tzf "$winarm" | grep -E '\.exe$' | head -1 || true)
+                if [ -n "$inner" ]; then
+                  tmp=$(mktemp -d)
+                  tar -xzf "$winarm" -C "$tmp" "$inner"
+                  echo "level=info msg=\"windows/arm64 binary type\" path=$inner type=$(file -b "$tmp/$inner")"
+                  echo "$(file -b "$tmp/$inner")" | grep -qi 'aarch64\|arm64\|aa64'
+                fi
+                ;;
+            esac
+          fi
+          avx2=$(find dist -type f -name '*amd64_avx2*' ! -name '*.json' | head -1)
+          if [ -z "$avx2" ]; then
+            echo "level=error msg=\"amd64 avx2 artifact missing\" dir=dist"
+            missing=1
+          else
+            echo "level=info msg=\"amd64 avx2 artifact ready\" path=$avx2"
+            ls -lh "$avx2"
+          fi
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - uses: actions/upload-artifact@v7
+        if: github.event_name == 'workflow_dispatch' && inputs.publish != 'true'
+        with:
+          name: dist
+          path: dist/
 
       - uses: actions/cache/save@v6
         if: always() && steps.go-cache.outputs.cache-hit != 'true'
