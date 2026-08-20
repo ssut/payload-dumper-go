@@ -1,13 +1,26 @@
-FROM golang as builder
+FROM golang:1.27 AS builder
 
 RUN apt-get update \
-    && apt-get install liblzma-dev
+    && apt-get install -y --no-install-recommends liblzma-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN git clone https://github.com/ssut/payload-dumper-go
+WORKDIR /src
 
-RUN cd payload-dumper-go \
-    && GOOS=linux go build -a -ldflags '-extldflags "-static"' /go/payload-dumper-go
+COPY go.mod go.sum ./
+RUN go mod download
 
-FROM alpine
-COPY --from=builder /go/payload-dumper-go/payload-dumper-go /go/bin/
-ENTRYPOINT ["/go/bin/payload-dumper-go"]
+COPY . .
+
+RUN CGO_ENABLED=1 GOOS=linux go build \
+    -ldflags '-extldflags "-static"' \
+    -o /out/payload-dumper-go .
+
+RUN mkdir -p /rootfs/tmp /rootfs/data \
+    && chmod 1777 /rootfs/tmp /rootfs/data
+
+FROM scratch
+COPY --from=builder /rootfs /
+COPY --from=builder /out/payload-dumper-go /payload-dumper-go
+USER 65534:65534
+WORKDIR /data
+ENTRYPOINT ["/payload-dumper-go"]
