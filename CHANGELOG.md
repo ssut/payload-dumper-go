@@ -1,5 +1,21 @@
 # Changelog
 
+## [2.0.2] - 2026-08-20
+
+### Changed
+
+- Built with Go 1.27 (`go.mod` go directive 1.25.0 -> 1.27.0). CI and release builds pick up `go1.27.0` automatically through `GOTOOLCHAIN=auto`.
+
+### Note
+
+- macOS builds now require macOS 13 Ventura or later, following Go 1.27 dropping support for earlier macOS versions.
+
+## [2.0.1] - 2026-08-19
+
+### Added
+
+- windows/arm64 release artifact, cross-compiled with llvm-mingw against a dedicated liblzma/libzstd sysroot.
+
 ## [2.0.0] - 2026-08-14
 
 ### Added
