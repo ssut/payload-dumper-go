@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"fmt"
@@ -8,8 +9,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
+	"github.com/ssut/payload-dumper-go/internal/fec"
 )
 
 func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, logger *slog.Logger) error {
@@ -84,24 +89,103 @@ func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, b
 	return nil
 }
 
-func checkFecReconstructible(part *chromeos_update_engine.PartitionUpdate, blockSize uint64) error {
-	fec := part.GetFecExtent()
-	if fec == nil || fec.GetNumBlocks() == 0 {
-		return nil
-	}
-	totalBlocks := part.GetNewPartitionInfo().GetSize() / blockSize
-	var dst []*chromeos_update_engine.Extent
-	for _, op := range part.GetOperations() {
-		dst = append(dst, op.GetDstExtents()...)
-	}
-	fecStart := fec.GetStartBlock()
-	fecEnd := fecStart + fec.GetNumBlocks()
-	for _, gap := range uncoveredRanges(dst, totalBlocks) {
-		if gap.start < fecEnd && fecStart < gap.end {
-			return fmt.Errorf("payload: partition %q requires FEC (forward error correction) data reconstruction, which is not supported yet", part.GetPartitionName())
+const (
+	minFecRoots = 2
+	maxFecRoots = 24
+)
+
+type verityOptions struct {
+	sem      *semaphore.Weighted
+	workers  int
+	noFEC    bool
+	progress func(done, total int)
+}
+
+func writeVerity(ctx context.Context, out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, opts verityOptions, logger *slog.Logger) (bool, error) {
+	name := part.GetPartitionName()
+	if part.GetHashTreeExtent().GetNumBlocks() > 0 {
+		if part.GetHashTreeDataExtent().GetNumBlocks() == 0 {
+			return false, fmt.Errorf("payload: partition %q: hash_tree_extent is set but hash_tree_data_extent is missing", name)
+		}
+		if err := writeHashTree(out, part, blockSize, logger); err != nil {
+			return false, err
 		}
 	}
+	if part.GetFecExtent().GetNumBlocks() == 0 {
+		return false, nil
+	}
+	if opts.noFEC {
+		logger.Warn("skipped FEC generation (-no-fec); image does not match its expected sha256 and must not be flashed",
+			slog.String("partition", name))
+		return true, nil
+	}
+	return false, writeFEC(ctx, out, part, blockSize, opts, logger)
+}
+
+func writeFEC(ctx context.Context, out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, opts verityOptions, logger *slog.Logger) error {
+	name := part.GetPartitionName()
+	fecExt := part.GetFecExtent()
+	dataExt := part.GetFecDataExtent()
+	treeExt := part.GetHashTreeExtent()
+
+	if err := validateExtents([]*chromeos_update_engine.Extent{fecExt, dataExt, treeExt}, blockSize); err != nil {
+		return fmt.Errorf("payload: partition %q: %w", name, err)
+	}
+	if dataExt.GetNumBlocks() == 0 {
+		return fmt.Errorf("payload: partition %q: fec_extent is set but fec_data_extent is missing", name)
+	}
+	if blockSize != fec.BlockSize {
+		return fmt.Errorf("payload: partition %q: FEC generation requires block size %d, got %d", name, fec.BlockSize, blockSize)
+	}
+	roots := int(part.GetFecRoots())
+	if roots < minFecRoots || roots > maxFecRoots {
+		return fmt.Errorf("payload: partition %q: fec_roots %d is outside the supported range %d..%d", name, roots, minFecRoots, maxFecRoots)
+	}
+
+	params := fec.Params{DataBlocks: int(dataExt.GetNumBlocks()), Roots: roots, BlockSize: blockSize}
+	if want := uint64(params.Rounds()) * uint64(roots); fecExt.GetNumBlocks() != want {
+		return fmt.Errorf("payload: partition %q: fec extent has %d blocks, expected %d (rounds=%d, fec_roots=%d)",
+			name, fecExt.GetNumBlocks(), want, params.Rounds(), roots)
+	}
+	if extentsOverlap(fecExt, dataExt) {
+		return fmt.Errorf("payload: partition %q: fec extent overlaps fec data extent", name)
+	}
+	if extentsOverlap(fecExt, treeExt) {
+		return fmt.Errorf("payload: partition %q: fec extent overlaps hash tree extent", name)
+	}
+	size := part.GetNewPartitionInfo().GetSize()
+	for _, e := range []struct {
+		what string
+		ext  *chromeos_update_engine.Extent
+	}{{"fec data", dataExt}, {"fec", fecExt}} {
+		if end := (e.ext.GetStartBlock() + e.ext.GetNumBlocks()) * blockSize; end > size {
+			return fmt.Errorf("payload: partition %q: %s extent ends at %d, beyond partition size %d", name, e.what, end, size)
+		}
+	}
+
+	started := time.Now()
+	dataOffset := int64(dataExt.GetStartBlock() * blockSize)
+	fecOffset := int64(fecExt.GetStartBlock() * blockSize)
+	if err := fec.Generate(ctx, out, out, dataOffset, fecOffset, params, opts.workers, opts.sem, opts.progress); err != nil {
+		return fmt.Errorf("payload: partition %q: %w", name, err)
+	}
+	logger.Debug("computed dm-verity fec",
+		slog.String("partition", name),
+		slog.Int("roots", roots),
+		slog.Int("rounds", params.Rounds()),
+		slog.Int64("bytes", params.ParityBytes()),
+		slog.Duration("took", time.Since(started)),
+	)
 	return nil
+}
+
+func extentsOverlap(a, b *chromeos_update_engine.Extent) bool {
+	if a.GetNumBlocks() == 0 || b.GetNumBlocks() == 0 {
+		return false
+	}
+	aStart, aEnd := a.GetStartBlock(), a.GetStartBlock()+a.GetNumBlocks()
+	bStart, bEnd := b.GetStartBlock(), b.GetStartBlock()+b.GetNumBlocks()
+	return aStart < bEnd && bStart < aEnd
 }
 
 func hashTreeHasher(algorithm string) (func() hash.Hash, int, error) {

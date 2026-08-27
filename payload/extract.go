@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 )
@@ -23,6 +24,7 @@ type ExtractOptions struct {
 	Concurrency int
 	SourceDir   string
 	SkipVerify  bool
+	NoFEC       bool
 	Logger      *slog.Logger
 	OnProgress  ProgressFunc
 }
@@ -57,12 +59,13 @@ func (p *Payload) Extract(ctx context.Context, opts ExtractOptions) error {
 		slog.Bool("delta", p.IsDelta()),
 		slog.Uint64("minor_version", uint64(p.MinorVersion())),
 	)
+	sem := semaphore.NewWeighted(int64(concurrency))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(concurrency)
 	for _, part := range selected {
 		part := part
 		g.Go(func() error {
-			return p.extractPartition(ctx, part, opts, logger)
+			return p.extractPartition(ctx, part, opts, sem, concurrency, logger)
 		})
 	}
 	return g.Wait()
@@ -122,7 +125,7 @@ func checkSourceAvailable(parts []*chromeos_update_engine.PartitionUpdate, sourc
 	return nil
 }
 
-func (p *Payload) extractPartition(ctx context.Context, part *chromeos_update_engine.PartitionUpdate, opts ExtractOptions, logger *slog.Logger) (err error) {
+func (p *Payload) extractPartition(ctx context.Context, part *chromeos_update_engine.PartitionUpdate, opts ExtractOptions, sem *semaphore.Weighted, workers int, logger *slog.Logger) (err error) {
 	name := part.GetPartitionName()
 	totalOps := len(part.GetOperations())
 	report := func(completed int, done bool, failure error) {
@@ -156,9 +159,6 @@ func (p *Payload) extractPartition(ctx context.Context, part *chromeos_update_en
 
 	var src *sourceImage
 	if partitionNeedsSource(part) {
-		if err = checkFecReconstructible(part, p.blockSize); err != nil {
-			return err
-		}
 		src, err = openSourceImage(opts.SourceDir, part, opts.SkipVerify, logger)
 		if err != nil {
 			return err
@@ -196,13 +196,29 @@ func (p *Payload) extractPartition(ctx context.Context, part *chromeos_update_en
 		report(completed, false, nil)
 	}
 
-	if src != nil {
-		if err = writeHashTree(out, part, p.blockSize, logger); err != nil {
-			return err
-		}
+	var fecSkipped bool
+	fecSkipped, err = writeVerity(ctx, out, part, p.blockSize, verityOptions{
+		sem:     sem,
+		workers: workers,
+		noFEC:   opts.NoFEC,
+		progress: func(done, total int) {
+			if opts.OnProgress != nil {
+				opts.OnProgress(ProgressEvent{
+					Partition:      name,
+					TotalOps:       totalOps,
+					CompletedOps:   totalOps,
+					Phase:          PhaseFEC,
+					PhaseCompleted: done,
+					PhaseTotal:     total,
+				})
+			}
+		},
+	}, logger)
+	if err != nil {
+		return err
 	}
 
-	if err = p.verifyOutput(out, part, opts.SkipVerify, logger); err != nil {
+	if err = p.verifyOutput(out, part, opts.SkipVerify || fecSkipped, logger); err != nil {
 		return err
 	}
 	logger.Info("partition extracted",

@@ -10,6 +10,7 @@ See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-
 
 - Incredibly fast decompression. All decompression progresses are executed in parallel.
 - Incremental OTA (delta) payload support. Applied on top of the base images (`-old`), bit-exact output.
+- Regenerates the dm-verity metadata that delta payloads omit: both the hash tree and the Reed-Solomon FEC parity. No `avbtool` or AOSP `fec` tooling needed.
 - Verifies everything: operation data, source images, and final images (sha256). Fails loudly with a non-zero exit code.
 - Support original zip package that contains payload.bin, read in place without a temp copy.
 - Usable as a Go library. (`github.com/ssut/payload-dumper-go/payload`)
@@ -80,6 +81,7 @@ Options:
   -q, -quiet             Quiet mode - suppress non-essential output
   -m, -machine-readable  Machine-readable output format
   -no-verify             Skip sha256 verification
+  -no-fec                Skip dm-verity FEC generation (see below)
 ```
 
 ### Incremental (delta) OTA
@@ -90,6 +92,20 @@ Extract the base (previous) full OTA first, then pass it via `-old`:
 payload-dumper-go -o base_images base_full_ota.zip
 payload-dumper-go -old base_images -o new_images incremental_ota.zip
 ```
+
+Delta payloads leave out the dm-verity hash tree and FEC parity for partitions such as
+`system`, `product`, `vendor` and `odm`, expecting the device to compute them while
+installing. payload-dumper-go computes both, so the extracted images are bit-exact and
+pass their own sha256 check.
+
+FEC generation reads each affected partition once more and is the slowest part of a
+delta extraction (a few seconds per gigabyte). `-no-fec` skips it, which is only useful
+for inspecting an image's contents: the FEC region is left unwritten, the image will not
+match its expected sha256, and it must not be flashed.
+
+When using `-m`, note that the percentage reaches 100% when the install operations
+finish, while FEC generation still runs. Wait for the process to exit rather than for
+the percentage.
 
 ### Library usage
 
