@@ -15,10 +15,13 @@
 // Parity is emitted most-significant coefficient first: p[0] is the
 // coefficient of x^(roots-1), matching the on-disk order dm-verity expects.
 //
-// This file is written from the mathematical definition above: polynomial
-// long division in GF(2^8), realized as a shift register whose taps are the
-// coefficients of g. It is NOT derived from Phil Karn's Reed-Solomon library
-// (AOSP external/fec), which is LGPL-licensed and was not consulted.
+// This file implements that definition directly: polynomial long division in
+// GF(2^8), realized as a shift register whose taps are the coefficients of g.
+//
+// Phil Karn's Reed-Solomon implementation in AOSP external/fec is LGPL
+// licensed, while this project is Apache-2.0. No code from it was copied.
+// Only the parameter values above were taken, and those come from the
+// Apache-2.0 licensed libfec ecc.h rather than from the LGPL sources.
 //
 // References:
 //
