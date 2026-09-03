@@ -7,20 +7,21 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 )
 
-func TestDebugRealExtract(t *testing.T) {
-	payloadPath := os.Getenv("DBG_PAYLOAD")
+func TestE2ERealPayload(t *testing.T) {
+	payloadPath := os.Getenv("E2E_PAYLOAD")
 	if payloadPath == "" {
-		t.Skip("DBG_PAYLOAD not set")
+		t.Skip("E2E_PAYLOAD not set")
 	}
-	oldDir := os.Getenv("DBG_OLD")
-	targetDir := os.Getenv("DBG_TARGET")
-	outDir := os.Getenv("DBG_OUT")
+	oldDir := os.Getenv("E2E_OLD")
+	targetDir := os.Getenv("E2E_TARGET")
+	outDir := os.Getenv("E2E_OUT")
 	if outDir == "" {
 		outDir = t.TempDir()
 	}
@@ -49,7 +50,7 @@ func TestDebugRealExtract(t *testing.T) {
 	}
 
 	var selected []string
-	if v := os.Getenv("DBG_PART"); v != "" {
+	if v := os.Getenv("E2E_PARTS"); v != "" {
 		selected = strings.Split(v, ",")
 	}
 
@@ -69,7 +70,7 @@ func TestDebugRealExtract(t *testing.T) {
 	}
 	for _, part := range p.manifest.GetPartitions() {
 		name := part.GetPartitionName()
-		if len(selected) > 0 && !slicesContains(selected, name) {
+		if len(selected) > 0 && !slices.Contains(selected, name) {
 			continue
 		}
 		got, readErr := os.ReadFile(filepath.Join(outDir, name+".img"))
@@ -86,15 +87,6 @@ func TestDebugRealExtract(t *testing.T) {
 		off := firstDiff(got, want)
 		t.Errorf("%s: first difference at byte %d (%s)", name, off, classifyOffset(part, uint64(off), p.blockSize))
 	}
-}
-
-func slicesContains(list []string, want string) bool {
-	for _, v := range list {
-		if v == want {
-			return true
-		}
-	}
-	return false
 }
 
 func firstDiff(a, b []byte) int {
