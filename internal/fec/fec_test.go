@@ -3,7 +3,9 @@ package fec
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
+	"sync"
 	"testing"
 
 	"github.com/ssut/payload-dumper-go/internal/fec/fectest"
@@ -38,20 +40,72 @@ func patterned(n int) []byte {
 	return b
 }
 
-func runGenerate(t *testing.T, data []byte, roots, workers int) []byte {
+func params(data []byte, roots, batchRounds int) Params {
+	return Params{DataBlocks: len(data) / BlockSize, Roots: roots, BlockSize: BlockSize, BatchRounds: batchRounds}
+}
+
+type generateRun struct {
+	parity     []byte
+	batches    int
+	done       []int
+	wrongTotal int
+}
+
+func generateWith(t *testing.T, ctx context.Context, data []byte, p Params, workers int, hook func(done, total int)) (generateRun, error) {
 	t.Helper()
-	p := Params{DataBlocks: len(data) / BlockSize, Roots: roots, BlockSize: BlockSize}
 	f := &memFile{b: make([]byte, int64(len(data))+p.ParityBytes())}
 	copy(f.b, data)
-	if err := Generate(context.Background(), f, f, 0, int64(len(data)), p, workers, nil, nil); err != nil {
+	run := generateRun{batches: p.Batches()}
+	var mu sync.Mutex
+	progress := func(done, total int) {
+		mu.Lock()
+		run.done = append(run.done, done)
+		if total != run.batches {
+			run.wrongTotal++
+		}
+		mu.Unlock()
+		if hook != nil {
+			hook(done, total)
+		}
+	}
+	err := Generate(ctx, f, f, 0, int64(len(data)), p, workers, nil, progress)
+	run.parity = f.b[len(data):]
+	return run, err
+}
+
+func checkProgress(t *testing.T, run generateRun) {
+	t.Helper()
+	if run.wrongTotal > 0 {
+		t.Fatalf("%d progress calls reported a total other than %d batches", run.wrongTotal, run.batches)
+	}
+	if len(run.done) != run.batches {
+		t.Fatalf("progress reported %d times for %d batches: %v", len(run.done), run.batches, run.done)
+	}
+	seen := make([]bool, run.batches+1)
+	for _, d := range run.done {
+		if d < 1 || d > run.batches {
+			t.Fatalf("progress value %d out of range 1..%d", d, run.batches)
+		}
+		if seen[d] {
+			t.Fatalf("progress value %d reported twice: %v", d, run.done)
+		}
+		seen[d] = true
+	}
+}
+
+func runGenerate(t *testing.T, data []byte, roots, workers, batchRounds int) []byte {
+	t.Helper()
+	run, err := generateWith(t, context.Background(), data, params(data, roots, batchRounds), workers, nil)
+	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
-	return f.b[len(data):]
+	checkProgress(t, run)
+	return run.parity
 }
 
 func TestFecAOSPPattern(t *testing.T) {
 	data := bytes.Repeat([]byte{0x01}, BlockSize)
-	got := runGenerate(t, data, 2, 1)
+	got := runGenerate(t, data, 2, 1, 0)
 	want := bytes.Repeat([]byte{0x8e, 0x8f}, BlockSize)
 	if !bytes.Equal(got, want) {
 		for i := range got {
@@ -64,22 +118,26 @@ func TestFecAOSPPattern(t *testing.T) {
 }
 
 func TestFecMatchesOracle(t *testing.T) {
-	shapes := []struct{ dataBlocks, roots int }{
-		{1, 2}, {253, 2}, {254, 2}, {506, 2}, {507, 2},
-		{100, 24}, {232, 24}, {60, 10}, {130, 12},
+	shapes := []struct{ dataBlocks, roots, workers, batch int }{
+		{1, 2, 1, 0}, {253, 2, 4, 0}, {254, 2, 4, 0}, {506, 2, 4, 0}, {507, 2, 4, 0},
+		{100, 24, 4, 0}, {232, 24, 4, 0}, {60, 10, 4, 0}, {130, 12, 4, 0},
+		{254, 2, 2, 1}, {507, 2, 3, 1}, {507, 2, 2, 2}, {1000, 2, 4, 3}, {232, 24, 2, 1}, {730, 12, 4, 2},
 	}
 	for _, s := range shapes {
 		data := patterned(s.dataBlocks * BlockSize)
-		got := runGenerate(t, data, s.roots, 4)
+		p := params(data, s.roots, s.batch)
+		if s.batch > 0 && (p.Batches() < 2 || s.workers < 2) {
+			t.Fatalf("shape %+v spans %d batches with %d workers; it does not exercise the parallel multi-batch path", s, p.Batches(), s.workers)
+		}
+		got := runGenerate(t, data, s.roots, s.workers, s.batch)
 		want := fectest.FEC(data, s.roots)
 		if len(got) != len(want) {
-			t.Fatalf("dataBlocks=%d roots=%d: parity length %d, want %d", s.dataBlocks, s.roots, len(got), len(want))
+			t.Fatalf("shape %+v: parity length %d, want %d", s, len(got), len(want))
 		}
 		for i := range got {
 			if got[i] != want[i] {
-				p := Params{DataBlocks: s.dataBlocks, Roots: s.roots, BlockSize: BlockSize}
-				t.Fatalf("dataBlocks=%d roots=%d rounds=%d: first difference at parity byte %d: got %#02x, want %#02x",
-					s.dataBlocks, s.roots, p.Rounds(), i, got[i], want[i])
+				t.Fatalf("shape %+v rounds=%d batches=%d: first difference at parity byte %d: got %#02x, want %#02x",
+					s, p.Rounds(), p.Batches(), i, got[i], want[i])
 			}
 		}
 	}
@@ -108,38 +166,58 @@ func TestInterleaveMatchesUpstreamFormula(t *testing.T) {
 
 func TestFecZeroPadIdentity(t *testing.T) {
 	data := patterned(254 * BlockSize)
-	got := runGenerate(t, data, 2, 1)
+	got := runGenerate(t, data, 2, 1, 0)
 	padded := append(append([]byte{}, data...), make([]byte, 252*BlockSize)...)
-	gotPadded := runGenerate(t, padded, 2, 1)
+	gotPadded := runGenerate(t, padded, 2, 1, 0)
 	if !bytes.Equal(got, gotPadded) {
 		t.Fatal("explicit trailing zero blocks changed the parity; out-of-range blocks are not treated as zero symbols")
 	}
 }
 
 func TestFecDeterministicAcrossWorkers(t *testing.T) {
-	data := patterned(600 * BlockSize)
-	base := runGenerate(t, data, 2, 1)
+	data := patterned(8 * 253 * BlockSize)
+	if p := params(data, 2, 1); p.Batches() != 8 {
+		t.Fatalf("fixture spans %d batches, want 8", p.Batches())
+	}
+	base := runGenerate(t, data, 2, 1, 1)
+	if want := fectest.FEC(data, 2); !bytes.Equal(base, want) {
+		t.Fatal("single-worker parity does not match the reference implementation")
+	}
 	for _, workers := range []int{2, 4, 8, 16} {
-		if got := runGenerate(t, data, 2, workers); !bytes.Equal(got, base) {
+		if got := runGenerate(t, data, 2, workers, 1); !bytes.Equal(got, base) {
 			t.Fatalf("workers=%d produced different parity than workers=1", workers)
 		}
+	}
+	if got := runGenerate(t, data, 2, 4, 0); !bytes.Equal(got, base) {
+		t.Fatal("default batch size produced different parity than single-round batches")
 	}
 }
 
 func TestFecContextCancel(t *testing.T) {
-	data := patterned(600 * BlockSize)
-	p := Params{DataBlocks: 600, Roots: 2, BlockSize: BlockSize}
-	f := &memFile{b: make([]byte, int64(len(data))+p.ParityBytes())}
-	copy(f.b, data)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	err := Generate(ctx, f, f, 0, int64(len(data)), p, 4, nil, nil)
-	if err == nil {
-		t.Fatal("Generate succeeded with a cancelled context")
-	}
-	if ctx.Err() == nil {
-		t.Fatal("context was not cancelled")
-	}
+	t.Run("before-start", func(t *testing.T) {
+		data := patterned(600 * BlockSize)
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		run, err := generateWith(t, ctx, data, params(data, 2, 0), 4, nil)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Generate returned %v, want context.Canceled", err)
+		}
+		if len(run.done) != 0 {
+			t.Fatalf("%d batches completed with a cancelled context", len(run.done))
+		}
+	})
+	t.Run("mid-run", func(t *testing.T) {
+		data := patterned(8 * 253 * BlockSize)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		run, err := generateWith(t, ctx, data, params(data, 2, 1), 2, func(done, total int) { cancel() })
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Generate returned %v, want context.Canceled", err)
+		}
+		if len(run.done) == 0 || len(run.done) >= run.batches {
+			t.Fatalf("%d of %d batches completed, want at least one but not all", len(run.done), run.batches)
+		}
+	})
 }
 
 func TestFecValidation(t *testing.T) {
@@ -151,6 +229,7 @@ func TestFecValidation(t *testing.T) {
 		{"roots-zero", Params{DataBlocks: 1, Roots: 0, BlockSize: BlockSize}},
 		{"roots-255", Params{DataBlocks: 1, Roots: 255, BlockSize: BlockSize}},
 		{"no-data", Params{DataBlocks: 0, Roots: 2, BlockSize: BlockSize}},
+		{"batch-negative", Params{DataBlocks: 1, Roots: 2, BlockSize: BlockSize, BatchRounds: -1}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -95,10 +95,11 @@ const (
 )
 
 type verityOptions struct {
-	sem      *semaphore.Weighted
-	workers  int
-	noFEC    bool
-	progress func(done, total int)
+	sem         *semaphore.Weighted
+	workers     int
+	batchRounds int
+	noFEC       bool
+	progress    func(done, total int)
 }
 
 func writeVerity(ctx context.Context, out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, opts verityOptions, logger *slog.Logger) (bool, error) {
@@ -142,7 +143,7 @@ func writeFEC(ctx context.Context, out *os.File, part *chromeos_update_engine.Pa
 		return fmt.Errorf("payload: partition %q: fec_roots %d is outside the supported range %d..%d", name, roots, minFecRoots, maxFecRoots)
 	}
 
-	params := fec.Params{DataBlocks: int(dataExt.GetNumBlocks()), Roots: roots, BlockSize: blockSize}
+	params := fec.Params{DataBlocks: int(dataExt.GetNumBlocks()), Roots: roots, BlockSize: blockSize, BatchRounds: opts.batchRounds}
 	if want := uint64(params.Rounds()) * uint64(roots); fecExt.GetNumBlocks() != want {
 		return fmt.Errorf("payload: partition %q: fec extent has %d blocks, expected %d (rounds=%d, fec_roots=%d)",
 			name, fecExt.GetNumBlocks(), want, params.Rounds(), roots)
@@ -173,6 +174,7 @@ func writeFEC(ctx context.Context, out *os.File, part *chromeos_update_engine.Pa
 		slog.String("partition", name),
 		slog.Int("roots", roots),
 		slog.Int("rounds", params.Rounds()),
+		slog.Int("batches", params.Batches()),
 		slog.Int64("bytes", params.ParityBytes()),
 		slog.Duration("took", time.Since(started)),
 	)

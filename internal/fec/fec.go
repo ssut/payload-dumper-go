@@ -10,8 +10,8 @@ import (
 )
 
 const (
-	BlockSize   = 4096
-	batchRounds = 128
+	BlockSize          = 4096
+	DefaultBatchRounds = 128
 )
 
 type Limiter interface {
@@ -20,9 +20,10 @@ type Limiter interface {
 }
 
 type Params struct {
-	DataBlocks int
-	Roots      int
-	BlockSize  uint64
+	DataBlocks  int
+	Roots       int
+	BlockSize   uint64
+	BatchRounds int
 }
 
 func (p Params) rsN() int { return 255 - p.Roots }
@@ -30,6 +31,18 @@ func (p Params) rsN() int { return 255 - p.Roots }
 func (p Params) Rounds() int {
 	n := p.rsN()
 	return (p.DataBlocks + n - 1) / n
+}
+
+func (p Params) batchRounds() int {
+	if p.BatchRounds <= 0 {
+		return DefaultBatchRounds
+	}
+	return p.BatchRounds
+}
+
+func (p Params) Batches() int {
+	b := p.batchRounds()
+	return (p.Rounds() + b - 1) / b
 }
 
 func (p Params) ParityBytes() int64 {
@@ -46,6 +59,9 @@ func (p Params) Validate() error {
 	if p.DataBlocks <= 0 {
 		return fmt.Errorf("fec: data block count must be positive, got %d", p.DataBlocks)
 	}
+	if p.BatchRounds < 0 {
+		return fmt.Errorf("fec: batch rounds must not be negative, got %d", p.BatchRounds)
+	}
 	return nil
 }
 
@@ -58,7 +74,8 @@ func Generate(ctx context.Context, src io.ReaderAt, dst io.WriterAt, dataOffset,
 		return err
 	}
 	rounds := p.Rounds()
-	batches := (rounds + batchRounds - 1) / batchRounds
+	batches := p.Batches()
+	batchRounds := p.batchRounds()
 	if workers <= 0 {
 		workers = 1
 	}
@@ -103,8 +120,8 @@ func Generate(ctx context.Context, src io.ReaderAt, dst io.WriterAt, dataOffset,
 
 func generateBatch(ctx context.Context, src io.ReaderAt, dst io.WriterAt, enc *Encoder, batch, rounds int, p Params, dataOffset, fecOffset int64, buf, state []byte) error {
 	bs := int(p.BlockSize)
-	r0 := batch * batchRounds
-	width := batchRounds
+	width := p.batchRounds()
+	r0 := batch * width
 	if rounds-r0 < width {
 		width = rounds - r0
 	}

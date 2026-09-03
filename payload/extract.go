@@ -27,6 +27,8 @@ type ExtractOptions struct {
 	NoFEC       bool
 	Logger      *slog.Logger
 	OnProgress  ProgressFunc
+
+	fecBatchRounds int
 }
 
 func (p *Payload) Extract(ctx context.Context, opts ExtractOptions) error {
@@ -198,9 +200,10 @@ func (p *Payload) extractPartition(ctx context.Context, part *chromeos_update_en
 
 	var fecSkipped bool
 	fecSkipped, err = writeVerity(ctx, out, part, p.blockSize, verityOptions{
-		sem:     sem,
-		workers: workers,
-		noFEC:   opts.NoFEC,
+		sem:         sem,
+		workers:     workers,
+		batchRounds: opts.fecBatchRounds,
+		noFEC:       opts.NoFEC,
 		progress: func(done, total int) {
 			if opts.OnProgress != nil {
 				opts.OnProgress(ProgressEvent{
