@@ -97,8 +97,8 @@ Delta payloads omit the dm-verity hash tree and FEC parity for partitions like `
 and `vendor`, expecting the device to compute them on install. Both are computed here,
 so the output is bit-exact.
 
-`-no-fec` skips the FEC step. The image then fails its sha256 check and must not be
-flashed, so it is only useful for inspecting contents. Note that `-m` reports 100% when
+`-no-fec` skips FEC generation and final image verification for partitions that
+require FEC. These images must not be flashed; use this option only to inspect contents. Note that `-m` reports 100% when
 the operations finish, while FEC still runs; wait for the process to exit.
 
 ### Library usage

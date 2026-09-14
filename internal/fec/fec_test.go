@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 	"testing"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/ssut/payload-dumper-go/internal/fec/fectest"
 )
@@ -230,6 +233,7 @@ func TestFecValidation(t *testing.T) {
 		{"roots-255", Params{DataBlocks: 1, Roots: 255, BlockSize: BlockSize}},
 		{"no-data", Params{DataBlocks: 0, Roots: 2, BlockSize: BlockSize}},
 		{"batch-negative", Params{DataBlocks: 1, Roots: 2, BlockSize: BlockSize, BatchRounds: -1}},
+		{"address-overflow", Params{DataBlocks: int(^uint(0) >> 1), Roots: 2, BlockSize: BlockSize, BatchRounds: int(^uint(0) >> 1)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,5 +242,106 @@ func TestFecValidation(t *testing.T) {
 				t.Fatal("Generate succeeded, want error")
 			}
 		})
+	}
+}
+
+type countingLimiter struct {
+	sem      *semaphore.Weighted
+	acquired int
+	released int
+}
+
+func (l *countingLimiter) Acquire(ctx context.Context, n int64) error {
+	if err := l.sem.Acquire(ctx, n); err != nil {
+		return err
+	}
+	l.acquired++
+	return nil
+}
+
+func (l *countingLimiter) Release(n int64) {
+	l.released++
+	l.sem.Release(n)
+}
+
+func TestFecLimiterCoversWorkerLifetime(t *testing.T) {
+	data := patterned(4 * 253 * BlockSize)
+	p := params(data, 2, 1)
+	for _, failRead := range []bool{false, true} {
+		t.Run(fmt.Sprint(failRead), func(t *testing.T) {
+			src := &memFile{b: data}
+			if failRead {
+				src.b = nil
+			}
+			dst := &memFile{b: make([]byte, p.ParityBytes())}
+			lim := &countingLimiter{sem: semaphore.NewWeighted(1)}
+			err := Generate(context.Background(), src, dst, 0, 0, p, 1, lim, nil)
+			if failRead && err == nil {
+				t.Fatal("Generate succeeded with missing data")
+			}
+			if !failRead && err != nil {
+				t.Fatal(err)
+			}
+			if lim.acquired != 1 || lim.released != 1 {
+				t.Fatalf("limiter acquired %d times and released %d times, want one worker lifetime", lim.acquired, lim.released)
+			}
+			if !lim.sem.TryAcquire(1) {
+				t.Fatal("worker leaked limiter capacity")
+			}
+			if !failRead && !bytes.Equal(dst.b, fectest.FEC(data, 2)) {
+				t.Fatal("limited generation differs from oracle")
+			}
+		})
+	}
+}
+
+func TestFecCeilDivisionDoesNotOverflow(t *testing.T) {
+	maxInt := int(^uint(0) >> 1)
+	p := Params{DataBlocks: maxInt, Roots: 2, BlockSize: BlockSize, BatchRounds: maxInt}
+	want := maxInt / 253
+	if maxInt%253 != 0 {
+		want++
+	}
+	if got := p.Rounds(); got != want {
+		t.Fatalf("rounds=%d, want %d", got, want)
+	}
+	if got := p.Batches(); got != 1 {
+		t.Fatalf("batches=%d, want 1", got)
+	}
+}
+
+func TestFecOversizedBatchUsesActualRounds(t *testing.T) {
+	data := patterned(BlockSize)
+	p := params(data, 2, int(^uint(0)>>1))
+	run, err := generateWith(t, context.Background(), data, p, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(run.parity, fectest.FEC(data, 2)) {
+		t.Fatal("parity differs from oracle")
+	}
+}
+
+type boundedZeroReader struct{ size int64 }
+
+func (r boundedZeroReader) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 || off > r.size-int64(len(p)) {
+		return 0, io.EOF
+	}
+	clear(p)
+	return len(p), nil
+}
+
+func TestFecLastRoundNear32BitBlockLimit(t *testing.T) {
+	p := Params{DataBlocks: int(^uint32(0) >> 1), Roots: 2, BlockSize: BlockSize, BatchRounds: 1}
+	enc, err := NewEncoder(p.Roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dst := &memFile{b: make([]byte, BlockSize*p.Roots)}
+	last := p.Rounds() - 1
+	err = generateBatch(context.Background(), boundedZeroReader{size: int64(p.DataBlocks) * BlockSize}, dst, enc, last, p.Rounds(), p, 0, -int64(last)*int64(p.Roots)*BlockSize, make([]byte, BlockSize), make([]byte, BlockSize*p.Roots))
+	if err != nil {
+		t.Fatalf("last padded round overflowed its block index: %v", err)
 	}
 }

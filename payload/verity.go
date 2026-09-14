@@ -17,7 +17,7 @@ import (
 	"github.com/ssut/payload-dumper-go/internal/fec"
 )
 
-func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, logger *slog.Logger) error {
+func writeHashTree(ctx context.Context, out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, logger *slog.Logger) error {
 	treeExtent := part.GetHashTreeExtent()
 	dataExtent := part.GetHashTreeDataExtent()
 	if treeExtent == nil || dataExtent == nil {
@@ -31,8 +31,33 @@ func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, b
 	if err != nil {
 		return fmt.Errorf("payload: partition %q: %w", part.GetPartitionName(), err)
 	}
-	salt := part.GetHashTreeSalt()
 	hashSize := nextPowerOfTwo(digestLen)
+	if blockSize < uint64(hashSize)*2 || blockSize&(blockSize-1) != 0 {
+		return fmt.Errorf("payload: partition %q: invalid hash tree block size %d", part.GetPartitionName(), blockSize)
+	}
+	if err := validateExtents([]*chromeos_update_engine.Extent{treeExtent, dataExtent}, blockSize); err != nil {
+		return fmt.Errorf("payload: partition %q: %w", part.GetPartitionName(), err)
+	}
+	for _, extent := range []*chromeos_update_engine.Extent{treeExtent, dataExtent} {
+		if (extent.GetStartBlock()+extent.GetNumBlocks())*blockSize > part.GetNewPartitionInfo().GetSize() {
+			return fmt.Errorf("payload: partition %q: hash tree extent exceeds partition size", part.GetPartitionName())
+		}
+	}
+	if extentsOverlap(treeExtent, dataExtent) {
+		return fmt.Errorf("payload: partition %q: hash tree extent overlaps hash tree data extent", part.GetPartitionName())
+	}
+	var treeBlocks uint64
+	for blocks := dataExtent.GetNumBlocks(); ; {
+		blocks = (blocks + blockSize/uint64(hashSize) - 1) / (blockSize / uint64(hashSize))
+		treeBlocks += blocks
+		if blocks <= 1 {
+			break
+		}
+	}
+	if treeBlocks != treeExtent.GetNumBlocks() || treeBlocks > uint64(^uint(0)>>1)/blockSize {
+		return fmt.Errorf("payload: partition %q: computed hash tree size does not match addressable hash_tree extent size", part.GetPartitionName())
+	}
+	salt := part.GetHashTreeSalt()
 	dataOffset := int64(dataExtent.GetStartBlock() * blockSize)
 	dataBlocks := dataExtent.GetNumBlocks()
 
@@ -41,6 +66,9 @@ func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, b
 	digest := make([]byte, 0, digestLen)
 	reader := io.NewSectionReader(out, dataOffset, int64(dataBlocks*blockSize))
 	for i := uint64(0); i < dataBlocks; i++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if _, err := io.ReadFull(reader, buf); err != nil {
 			return fmt.Errorf("payload: reading hash tree data block %d: %w", i, err)
 		}
@@ -58,6 +86,9 @@ func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, b
 		prev := levels[len(levels)-1]
 		next := make([]byte, 0, (uint64(len(prev))/blockSize*uint64(hashSize)+blockSize-1)/blockSize*blockSize)
 		for off := 0; off < len(prev); off += int(blockSize) {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			h := newHash()
 			h.Write(salt)
 			h.Write(prev[off : off+int(blockSize)])
@@ -76,6 +107,9 @@ func writeHashTree(out *os.File, part *chromeos_update_engine.PartitionUpdate, b
 	expected := treeExtent.GetNumBlocks() * blockSize
 	if uint64(len(tree)) != expected {
 		return fmt.Errorf("payload: partition %q: computed hash tree size %d does not match hash_tree extent size %d", part.GetPartitionName(), len(tree), expected)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if _, err := out.WriteAt(tree, int64(treeExtent.GetStartBlock()*blockSize)); err != nil {
 		return fmt.Errorf("payload: writing hash tree: %w", err)
@@ -103,12 +137,15 @@ type verityOptions struct {
 }
 
 func writeVerity(ctx context.Context, out *os.File, part *chromeos_update_engine.PartitionUpdate, blockSize uint64, opts verityOptions, logger *slog.Logger) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	name := part.GetPartitionName()
 	if part.GetHashTreeExtent().GetNumBlocks() > 0 {
 		if part.GetHashTreeDataExtent().GetNumBlocks() == 0 {
 			return false, fmt.Errorf("payload: partition %q: hash_tree_extent is set but hash_tree_data_extent is missing", name)
 		}
-		if err := writeHashTree(out, part, blockSize, logger); err != nil {
+		if err := writeHashTree(ctx, out, part, blockSize, logger); err != nil {
 			return false, err
 		}
 	}
@@ -143,6 +180,9 @@ func writeFEC(ctx context.Context, out *os.File, part *chromeos_update_engine.Pa
 		return fmt.Errorf("payload: partition %q: fec_roots %d is outside the supported range %d..%d", name, roots, minFecRoots, maxFecRoots)
 	}
 
+	if dataExt.GetNumBlocks() > uint64(^uint(0)>>1) {
+		return fmt.Errorf("payload: partition %q: fec data block count exceeds addressable range", name)
+	}
 	params := fec.Params{DataBlocks: int(dataExt.GetNumBlocks()), Roots: roots, BlockSize: blockSize, BatchRounds: opts.batchRounds}
 	if want := uint64(params.Rounds()) * uint64(roots); fecExt.GetNumBlocks() != want {
 		return fmt.Errorf("payload: partition %q: fec extent has %d blocks, expected %d (rounds=%d, fec_roots=%d)",

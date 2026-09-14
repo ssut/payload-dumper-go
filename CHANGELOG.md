@@ -5,13 +5,18 @@
 ### Added
 
 - dm-verity FEC generation for incremental (delta) payloads. Delta payloads omit the Reed-Solomon parity and expect the device to compute it on install, so partitions like `system`, `product` and `vendor` previously failed with "requires FEC (forward error correction) data reconstruction, which is not supported yet" ([#69](https://github.com/ssut/payload-dumper-go/issues/69)). They now extract bit-exact.
-- `-no-fec` to skip FEC generation. The image then fails its sha256 check and must not be flashed.
+- `-no-fec` to skip FEC generation and final image verification for partitions that require FEC. These images must not be flashed.
 - `ProgressEvent.Phase`, `PhaseCompleted` and `PhaseTotal` for the verity phase that runs after the install operations. `ProgressFunc` must now be safe for concurrent use.
 
 ### Changed
 
 - The hash tree and FEC are regenerated whenever the payload declares the matching extents, not only when a partition uses source images. Delta partitions whose operations are all full-replace previously skipped hash tree generation and failed verification.
 - Extraction is cancellable during the verity phase; `ctx` was only checked between install operations.
+
+### Fixed
+
+- Reject invalid hash-tree extents before allocation or writing, including extents outside the verified partition image.
+- Bound FEC worker buffers by the shared concurrency limit across partitions and reject overflowing FEC sizes.
 
 ## [2.0.2] - 2026-08-20
 

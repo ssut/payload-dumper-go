@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -30,7 +31,11 @@ func (p Params) rsN() int { return 255 - p.Roots }
 
 func (p Params) Rounds() int {
 	n := p.rsN()
-	return (p.DataBlocks + n - 1) / n
+	rounds := p.DataBlocks / n
+	if p.DataBlocks%n != 0 {
+		rounds++
+	}
+	return rounds
 }
 
 func (p Params) batchRounds() int {
@@ -42,7 +47,12 @@ func (p Params) batchRounds() int {
 
 func (p Params) Batches() int {
 	b := p.batchRounds()
-	return (p.Rounds() + b - 1) / b
+	rounds := p.Rounds()
+	batches := rounds / b
+	if rounds%b != 0 {
+		batches++
+	}
+	return batches
 }
 
 func (p Params) ParityBytes() int64 {
@@ -62,6 +72,13 @@ func (p Params) Validate() error {
 	if p.BatchRounds < 0 {
 		return fmt.Errorf("fec: batch rounds must not be negative, got %d", p.BatchRounds)
 	}
+	if int64(p.DataBlocks) > math.MaxInt64/int64(p.BlockSize) || int64(p.Rounds()) > math.MaxInt64/int64(p.BlockSize)/int64(p.Roots) {
+		return fmt.Errorf("fec: data or parity exceeds addressable range")
+	}
+	width := min(p.batchRounds(), p.Rounds())
+	if width > int(^uint(0)>>1)/int(p.BlockSize)/p.Roots {
+		return fmt.Errorf("fec: batch buffers exceed addressable range")
+	}
 	return nil
 }
 
@@ -75,7 +92,7 @@ func Generate(ctx context.Context, src io.ReaderAt, dst io.WriterAt, dataOffset,
 	}
 	rounds := p.Rounds()
 	batches := p.Batches()
-	batchRounds := p.batchRounds()
+	batchRounds := min(p.batchRounds(), rounds)
 	if workers <= 0 {
 		workers = 1
 	}
@@ -87,25 +104,23 @@ func Generate(ctx context.Context, src io.ReaderAt, dst io.WriterAt, dataOffset,
 	g, ctx := errgroup.WithContext(ctx)
 	for w := 0; w < workers; w++ {
 		g.Go(func() error {
+			if lim != nil {
+				if err := lim.Acquire(ctx, 1); err != nil {
+					return err
+				}
+				defer lim.Release(1)
+			}
 			var buf, state []byte
 			for {
 				batch := int(next.Add(1) - 1)
 				if batch >= batches {
 					return nil
 				}
-				if lim != nil {
-					if err := lim.Acquire(ctx, 1); err != nil {
-						return err
-					}
-				}
 				if buf == nil {
 					buf = make([]byte, batchRounds*int(p.BlockSize))
 					state = make([]byte, batchRounds*int(p.BlockSize)*p.Roots)
 				}
 				err := generateBatch(ctx, src, dst, enc, batch, rounds, p, dataOffset, fecOffset, buf, state)
-				if lim != nil {
-					lim.Release(1)
-				}
 				if err != nil {
 					return err
 				}
@@ -134,14 +149,14 @@ func generateBatch(ctx context.Context, src io.ReaderAt, dst io.WriterAt, enc *E
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		first := j*rounds + r0
+		first := int64(j)*int64(rounds) + int64(r0)
 		have := 0
-		if first < p.DataBlocks {
+		if first < int64(p.DataBlocks) {
 			have = width
-			if p.DataBlocks-first < have {
-				have = p.DataBlocks - first
+			if int64(p.DataBlocks)-first < int64(have) {
+				have = int(int64(p.DataBlocks) - first)
 			}
-			if _, err := src.ReadAt(syms[:have*bs], dataOffset+int64(first)*int64(bs)); err != nil {
+			if _, err := src.ReadAt(syms[:have*bs], dataOffset+first*int64(bs)); err != nil {
 				return fmt.Errorf("fec: reading data block %d: %w", first, err)
 			}
 		}
