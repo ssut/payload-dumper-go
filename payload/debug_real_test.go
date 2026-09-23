@@ -19,6 +19,9 @@ func TestDebugRealDelta(t *testing.T) {
 	oldDir := os.Getenv("DBG_OLD")
 	targetDir := os.Getenv("DBG_TARGET")
 	partName := os.Getenv("DBG_PART")
+	if oldDir == "" || targetDir == "" || partName == "" {
+		t.Skip("DBG_OLD, DBG_TARGET and DBG_PART must all be set for the per-op oracle")
+	}
 
 	p, err := Open(payloadPath)
 	if err != nil {

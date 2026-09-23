@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/ssut/payload-dumper-go/chromeos_update_engine"
 	"github.com/ssut/payload-dumper-go/internal/bspatch/bsdifftest"
+	"github.com/ssut/payload-dumper-go/internal/fec/fectest"
 	"github.com/ssut/payload-dumper-go/payload"
 )
 
@@ -617,12 +619,64 @@ func TestExtractDeltaWritesHashTree(t *testing.T) {
 	}
 }
 
-func TestExtractDeltaFecUnsupported(t *testing.T) {
-	oldData := concat(block('o'), block('o'), block('o'))
-	newData := concat(block('o'), block('n'), make([]byte, blockSize))
-	data := buildPayloadWith(t, 9, []partitionSpec{
-		{
-			name:    "vendor",
+type fecSpec struct {
+	dataBlocks int
+	roots      uint32
+	setRoots   bool
+	withTree   bool
+	gapBlocks  int
+}
+
+type fecImage struct {
+	part    partitionSpec
+	verity  func(*chromeos_update_engine.PartitionUpdate)
+	newData []byte
+	oldData []byte
+}
+
+func buildFecImage(t *testing.T, name string, spec fecSpec) fecImage {
+	t.Helper()
+	if spec.dataBlocks < 2 {
+		t.Fatal("fixture needs at least two data blocks")
+	}
+	salt := bytes.Repeat([]byte{0xAB}, 32)
+
+	data := make([]byte, spec.dataBlocks*blockSize)
+	copy(data, block('1'))
+	copy(data[blockSize:], block('2'))
+	for i := 2 * blockSize; i < len(data); i++ {
+		data[i] = byte(i*131 + i>>13)
+	}
+
+	fecData := data
+	if spec.withTree {
+		level0 := make([]byte, 0, spec.dataBlocks*32)
+		for i := 0; i < spec.dataBlocks; i++ {
+			h := sha256.New()
+			h.Write(salt)
+			h.Write(data[i*blockSize : (i+1)*blockSize])
+			level0 = h.Sum(level0)
+		}
+		if len(level0) > blockSize {
+			t.Fatalf("fixture hash tree needs %d bytes, more than one block", len(level0))
+		}
+		fecData = concat(data, append(level0, make([]byte, blockSize-len(level0))...))
+	}
+
+	gap := bytes.Repeat([]byte{'g'}, spec.gapBlocks*blockSize)
+	parity := fectest.FEC(fecData, int(spec.roots))
+	newData := concat(fecData, gap, parity)
+
+	oldData := concat(data, bytes.Repeat([]byte{0x5A}, len(newData)-len(data)))
+	copy(oldData[len(fecData):], gap)
+	if bytes.Contains(oldData[len(data):], parity[:8]) {
+		t.Fatal("degenerate fixture: poison pattern collides with parity")
+	}
+
+	fecDataBlocks := uint64(len(fecData)) / blockSize
+	return fecImage{
+		part: partitionSpec{
+			name:    name,
 			newData: newData,
 			oldData: oldData,
 			ops: []opSpec{
@@ -632,19 +686,354 @@ func TestExtractDeltaFecUnsupported(t *testing.T) {
 					dst:     []*chromeos_update_engine.Extent{ext(0, 1)},
 					srcHash: sum(oldData[0:blockSize]),
 				},
-				{typ: chromeos_update_engine.InstallOperation_REPLACE, data: block('n'), dst: []*chromeos_update_engine.Extent{ext(1, 1)}},
+				{typ: chromeos_update_engine.InstallOperation_REPLACE, data: block('2'), dst: []*chromeos_update_engine.Extent{ext(1, 1)}},
 			},
 		},
-	}, func(update *chromeos_update_engine.PartitionUpdate) {
-		update.FecDataExtent = ext(0, 2)
-		update.FecExtent = ext(2, 1)
-		update.FecRoots = proto.Uint32(2)
+		verity: func(update *chromeos_update_engine.PartitionUpdate) {
+			if spec.withTree {
+				update.HashTreeDataExtent = ext(0, uint64(spec.dataBlocks))
+				update.HashTreeExtent = ext(uint64(spec.dataBlocks), 1)
+				update.HashTreeAlgorithm = proto.String("sha256")
+				update.HashTreeSalt = salt
+			}
+			update.FecDataExtent = ext(0, fecDataBlocks)
+			update.FecExtent = ext(fecDataBlocks+uint64(spec.gapBlocks), uint64(len(parity))/blockSize)
+			if spec.setRoots {
+				update.FecRoots = proto.Uint32(spec.roots)
+			}
+		},
+		newData: newData,
+		oldData: oldData,
+	}
+}
+
+func buildFecPayload(t *testing.T, images ...fecImage) []byte {
+	t.Helper()
+	specs := make([]partitionSpec, 0, len(images))
+	byName := make(map[string]fecImage, len(images))
+	for _, img := range images {
+		specs = append(specs, img.part)
+		byName[img.part.name] = img
+	}
+	return buildPayloadWith(t, 9, specs, func(update *chromeos_update_engine.PartitionUpdate) {
+		byName[update.GetPartitionName()].verity(update)
 	})
-	p := openPayload(t, data)
+}
+
+func fecFixtureSource(t *testing.T, spec fecSpec) ([]byte, []byte, []byte) {
+	t.Helper()
+	img := buildFecImage(t, "vendor", spec)
+	return buildFecPayload(t, img), img.newData, img.oldData
+}
+
+func extractFecFixture(t *testing.T, payloadBytes, oldData []byte, opts payload.ExtractOptions) []byte {
+	t.Helper()
+	p := openPayload(t, payloadBytes)
+	opts.SourceDir = writeSourceDir(t, map[string][]byte{"vendor": oldData})
+	opts.OutputDir = t.TempDir()
+	if err := p.Extract(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	return readImage(t, opts.OutputDir, "vendor")
+}
+
+const fecMultiBatchBlocks = 8 * 253
+
+func TestExtractDeltaWritesFec(t *testing.T) {
+	for _, roots := range []uint32{2, 12, 24} {
+		t.Run(fmt.Sprintf("roots%d", roots), func(t *testing.T) {
+			payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: 2, roots: roots, setRoots: true})
+			if got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{}); !bytes.Equal(got, newData) {
+				t.Fatal("generated FEC parity does not match the reference implementation")
+			}
+		})
+	}
+	t.Run("skip-verify", func(t *testing.T) {
+		payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: 2, roots: 2, setRoots: true})
+		got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{SkipVerify: true})
+		if !bytes.Equal(got, newData) {
+			t.Fatal("FEC generation must not be gated on verification")
+		}
+	})
+}
+
+func TestExtractDeltaFecMultiRound(t *testing.T) {
+	payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: 254, roots: 2, setRoots: true})
+	if got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{}); !bytes.Equal(got, newData) {
+		t.Fatal("multi-round FEC parity does not match the reference implementation")
+	}
+}
+
+func TestExtractDeltaFecCoversHashTree(t *testing.T) {
+	spec := fecSpec{dataBlocks: 2, roots: 2, setRoots: true, withTree: true}
+	payloadBytes, newData, oldData := fecFixtureSource(t, spec)
+
+	poisonedTree := concat(newData[:spec.dataBlocks*blockSize], bytes.Repeat([]byte{0x5A}, blockSize))
+	if bytes.Equal(fectest.FEC(poisonedTree, 2), newData[(spec.dataBlocks+1)*blockSize:]) {
+		t.Fatal("fixture cannot distinguish FEC computed before the hash tree was written")
+	}
+	if got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{}); !bytes.Equal(got, newData) {
+		t.Fatal("FEC must be computed after the hash tree is written")
+	}
+}
+
+func TestExtractDeltaFecDefaultRoots(t *testing.T) {
+	payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: 2, roots: 2})
+	if got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{}); !bytes.Equal(got, newData) {
+		t.Fatal("fec_roots must fall back to the proto default of 2")
+	}
+}
+
+func TestExtractDeltaFecPlacementGap(t *testing.T) {
+	payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: 2, roots: 2, setRoots: true, gapBlocks: 1})
+	if got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{}); !bytes.Equal(got, newData) {
+		t.Fatal("parity must be written at fec_extent.start_block")
+	}
+}
+
+func TestExtractFecDeterministicAcrossConcurrency(t *testing.T) {
+	payloadBytes, newData, oldData := fecFixtureSource(t, fecSpec{dataBlocks: fecMultiBatchBlocks, roots: 2, setRoots: true})
+	for _, c := range []int{1, 2, 8} {
+		var mu sync.Mutex
+		batches := 0
+		opts := payload.WithFECBatchRounds(payload.ExtractOptions{
+			Concurrency: c,
+			OnProgress: func(ev payload.ProgressEvent) {
+				mu.Lock()
+				defer mu.Unlock()
+				if ev.Phase == payload.PhaseFEC {
+					batches = ev.PhaseTotal
+				}
+			},
+		}, 1)
+		got := extractFecFixture(t, payloadBytes, oldData, opts)
+		if !bytes.Equal(got, newData) {
+			t.Fatalf("concurrency=%d produced different output", c)
+		}
+		mu.Lock()
+		ran := batches
+		mu.Unlock()
+		if ran < c {
+			t.Fatalf("concurrency=%d: FEC ran as %d batches, too few to occupy every worker", c, ran)
+		}
+	}
+}
+
+func TestExtractFecMultiplePartitions(t *testing.T) {
+	vendor := buildFecImage(t, "vendor", fecSpec{dataBlocks: 4 * 253, roots: 2, setRoots: true})
+	product := buildFecImage(t, "product", fecSpec{dataBlocks: 3*243 + 1, roots: 12, setRoots: true})
+	p := openPayload(t, buildFecPayload(t, vendor, product))
+	srcDir := writeSourceDir(t, map[string][]byte{"vendor": vendor.oldData, "product": product.oldData})
+	outDir := t.TempDir()
+	var mu sync.Mutex
+	batches := map[string]int{}
+	err := p.Extract(context.Background(), payload.WithFECBatchRounds(payload.ExtractOptions{
+		OutputDir:   outDir,
+		SourceDir:   srcDir,
+		Concurrency: 3,
+		OnProgress: func(ev payload.ProgressEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			if ev.Phase == payload.PhaseFEC {
+				batches[ev.Partition] = ev.PhaseTotal
+			}
+		},
+	}, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, img := range []fecImage{vendor, product} {
+		if got := readImage(t, outDir, img.part.name); !bytes.Equal(got, img.newData) {
+			t.Fatalf("%s: output does not match the reference implementation", img.part.name)
+		}
+		if batches[img.part.name] < 2 {
+			t.Fatalf("%s: FEC ran as %d batches, want at least 2", img.part.name, batches[img.part.name])
+		}
+	}
+}
+
+func TestExtractNoFec(t *testing.T) {
+	spec := fecSpec{dataBlocks: 2, roots: 2, setRoots: true}
+	payloadBytes, newData, oldData := fecFixtureSource(t, spec)
+	got := extractFecFixture(t, payloadBytes, oldData, payload.ExtractOptions{NoFEC: true})
+	if bytes.Equal(got, newData) {
+		t.Fatal("-no-fec still generated parity")
+	}
+	if !bytes.Equal(got[:spec.dataBlocks*blockSize], newData[:spec.dataBlocks*blockSize]) {
+		t.Fatal("-no-fec must still write the data region")
+	}
+}
+
+func TestExtractFecCancellation(t *testing.T) {
+	cases := []struct {
+		name    string
+		trigger func(payload.ProgressEvent) bool
+	}{
+		{"before-fec", func(ev payload.ProgressEvent) bool {
+			return ev.Phase == "" && ev.CompletedOps == ev.TotalOps && !ev.Done
+		}},
+		{"during-fec", func(ev payload.ProgressEvent) bool { return ev.Phase == payload.PhaseFEC }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payloadBytes, _, oldData := fecFixtureSource(t, fecSpec{dataBlocks: fecMultiBatchBlocks, roots: 2, setRoots: true})
+			p := openPayload(t, payloadBytes)
+			srcDir := writeSourceDir(t, map[string][]byte{"vendor": oldData})
+			outDir := t.TempDir()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var mu sync.Mutex
+			fecBatches, fecTotal := 0, 0
+			err := p.Extract(ctx, payload.WithFECBatchRounds(payload.ExtractOptions{
+				OutputDir:   outDir,
+				SourceDir:   srcDir,
+				Concurrency: 2,
+				OnProgress: func(ev payload.ProgressEvent) {
+					mu.Lock()
+					defer mu.Unlock()
+					if ev.Phase == payload.PhaseFEC {
+						fecBatches++
+						fecTotal = ev.PhaseTotal
+					}
+					if tc.trigger(ev) {
+						cancel()
+					}
+				},
+			}, 1))
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected context.Canceled, got %v", err)
+			}
+			if _, statErr := os.Stat(filepath.Join(outDir, "vendor.img")); !os.IsNotExist(statErr) {
+				t.Fatal("incomplete output image was not removed")
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if fecTotal > 0 && fecBatches >= fecTotal {
+				t.Fatalf("all %d FEC batches completed despite cancellation", fecTotal)
+			}
+		})
+	}
+}
+
+func TestExtractFecProgressPhase(t *testing.T) {
+	payloadBytes, _, oldData := fecFixtureSource(t, fecSpec{dataBlocks: fecMultiBatchBlocks, roots: 2, setRoots: true})
+	p := openPayload(t, payloadBytes)
 	srcDir := writeSourceDir(t, map[string][]byte{"vendor": oldData})
-	err := p.Extract(context.Background(), payload.ExtractOptions{OutputDir: t.TempDir(), SourceDir: srcDir})
-	if err == nil || !strings.Contains(err.Error(), "FEC") {
-		t.Fatalf("expected FEC unsupported error, got %v", err)
+	var mu sync.Mutex
+	var events []payload.ProgressEvent
+	err := p.Extract(context.Background(), payload.WithFECBatchRounds(payload.ExtractOptions{
+		OutputDir:   t.TempDir(),
+		SourceDir:   srcDir,
+		Concurrency: 4,
+		OnProgress: func(ev payload.ProgressEvent) {
+			mu.Lock()
+			defer mu.Unlock()
+			events = append(events, ev)
+		},
+	}, 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	phaseTotal := 0
+	var seen []bool
+	doneAt := -1
+	for i, ev := range events {
+		if ev.Err != nil {
+			t.Fatalf("event %d carries error %v", i, ev.Err)
+		}
+		if ev.Done {
+			if doneAt >= 0 {
+				t.Fatalf("Done reported twice (events %d and %d)", doneAt, i)
+			}
+			doneAt = i
+			continue
+		}
+		switch ev.Phase {
+		case "":
+			if phaseTotal > 0 {
+				t.Fatalf("event %d: install-phase event after the FEC phase started", i)
+			}
+		case payload.PhaseFEC:
+			if ev.CompletedOps != ev.TotalOps {
+				t.Fatalf("event %d: FEC phase reported CompletedOps %d, want %d", i, ev.CompletedOps, ev.TotalOps)
+			}
+			if phaseTotal == 0 {
+				phaseTotal = ev.PhaseTotal
+				seen = make([]bool, phaseTotal+1)
+			} else if ev.PhaseTotal != phaseTotal {
+				t.Fatalf("event %d: PhaseTotal changed from %d to %d", i, phaseTotal, ev.PhaseTotal)
+			}
+			if ev.PhaseCompleted < 1 || ev.PhaseCompleted > phaseTotal {
+				t.Fatalf("event %d: PhaseCompleted %d out of range 1..%d", i, ev.PhaseCompleted, phaseTotal)
+			}
+			if seen[ev.PhaseCompleted] {
+				t.Fatalf("event %d: PhaseCompleted %d reported twice", i, ev.PhaseCompleted)
+			}
+			seen[ev.PhaseCompleted] = true
+		default:
+			t.Fatalf("event %d: unknown phase %q", i, ev.Phase)
+		}
+	}
+	if phaseTotal < 2 {
+		t.Fatalf("FEC phase ran as %d batches, want at least 2", phaseTotal)
+	}
+	for n := 1; n <= phaseTotal; n++ {
+		if !seen[n] {
+			t.Fatalf("PhaseCompleted %d never reported", n)
+		}
+	}
+	if doneAt != len(events)-1 {
+		t.Fatalf("Done event at index %d of %d events, want last", doneAt, len(events))
+	}
+}
+
+func TestExtractDeltaFecErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*chromeos_update_engine.PartitionUpdate)
+		want   string
+	}{
+		{"size-mismatch", func(u *chromeos_update_engine.PartitionUpdate) { u.FecExtent = ext(2, 3) }, "expected"},
+		{"roots-1", func(u *chromeos_update_engine.PartitionUpdate) { u.FecRoots = proto.Uint32(1) }, "supported range"},
+		{"roots-25", func(u *chromeos_update_engine.PartitionUpdate) { u.FecRoots = proto.Uint32(25) }, "supported range"},
+		{"no-data-extent", func(u *chromeos_update_engine.PartitionUpdate) { u.FecDataExtent = nil }, "fec_data_extent is missing"},
+		{"overlaps-data", func(u *chromeos_update_engine.PartitionUpdate) { u.FecDataExtent = ext(0, 4) }, "overlaps"},
+		{"beyond-partition", func(u *chromeos_update_engine.PartitionUpdate) { u.FecExtent = ext(64, 2) }, "beyond partition size"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			oldData := concat(block('1'), block('2'), make([]byte, 2*blockSize))
+			newData := concat(block('1'), block('2'), make([]byte, 2*blockSize))
+			data := buildPayloadWith(t, 9, []partitionSpec{
+				{
+					name: "vendor", newData: newData, oldData: oldData,
+					ops: []opSpec{
+						{
+							typ:     chromeos_update_engine.InstallOperation_SOURCE_COPY,
+							src:     []*chromeos_update_engine.Extent{ext(0, 1)},
+							dst:     []*chromeos_update_engine.Extent{ext(0, 1)},
+							srcHash: sum(oldData[0:blockSize]),
+						},
+						{typ: chromeos_update_engine.InstallOperation_REPLACE, data: block('2'), dst: []*chromeos_update_engine.Extent{ext(1, 1)}},
+					},
+				},
+			}, func(u *chromeos_update_engine.PartitionUpdate) {
+				u.FecDataExtent = ext(0, 2)
+				u.FecExtent = ext(2, 2)
+				u.FecRoots = proto.Uint32(2)
+				tc.mutate(u)
+			})
+			p := openPayload(t, data)
+			srcDir := writeSourceDir(t, map[string][]byte{"vendor": oldData})
+			outDir := t.TempDir()
+			err := p.Extract(context.Background(), payload.ExtractOptions{OutputDir: outDir, SourceDir: srcDir})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("expected error containing %q, got %v", tc.want, err)
+			}
+			if _, statErr := os.Stat(filepath.Join(outDir, "vendor.img")); !os.IsNotExist(statErr) {
+				t.Fatal("incomplete output image was not removed")
+			}
+		})
 	}
 }
 

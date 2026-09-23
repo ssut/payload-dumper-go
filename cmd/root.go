@@ -30,6 +30,7 @@ func Execute() int {
 		quiet           bool
 		machineReadable bool
 		noVerify        bool
+		noFEC           bool
 	)
 
 	flag.IntVar(&concurrency, "c", runtime.NumCPU(), "Number of workers to extract concurrently (shorthand)")
@@ -46,6 +47,7 @@ func Execute() int {
 	flag.BoolVar(&machineReadable, "m", false, "Machine-readable output format (shorthand)")
 	flag.BoolVar(&machineReadable, "machine-readable", false, "Machine-readable output format")
 	flag.BoolVar(&noVerify, "no-verify", false, "Skip source/output sha256 verification")
+	flag.BoolVar(&noFEC, "no-fec", false, "Skip dm-verity FEC generation - output will not match its sha256 and must not be flashed")
 	flag.Parse()
 
 	if flag.NArg() == 0 {
@@ -128,6 +130,7 @@ func Execute() int {
 		Concurrency: concurrency,
 		SourceDir:   oldDirectory,
 		SkipVerify:  noVerify,
+		NoFEC:       noFEC,
 		OnProgress:  onProgress,
 	})
 	if bars != nil {
@@ -166,11 +169,12 @@ func printPartitionList(parts []payload.Partition, machineReadable bool) {
 }
 
 type barRenderer struct {
-	mu       sync.Mutex
-	progress *mpb.Progress
-	bars     map[string]*mpb.Bar
-	last     map[string]int
-	sizes    map[string]uint64
+	mu         sync.Mutex
+	progress   *mpb.Progress
+	bars       map[string]*mpb.Bar
+	last       map[string]int
+	phaseTotal map[string]int
+	sizes      map[string]uint64
 }
 
 func newBarRenderer(parts []payload.Partition) *barRenderer {
@@ -179,10 +183,11 @@ func newBarRenderer(parts []payload.Partition) *barRenderer {
 		sizes[part.Name] = part.Size
 	}
 	return &barRenderer{
-		progress: mpb.New(mpb.WithOutput(os.Stderr)),
-		bars:     map[string]*mpb.Bar{},
-		last:     map[string]int{},
-		sizes:    sizes,
+		progress:   mpb.New(mpb.WithOutput(os.Stderr)),
+		bars:       map[string]*mpb.Bar{},
+		last:       map[string]int{},
+		phaseTotal: map[string]int{},
+		sizes:      sizes,
 	}
 }
 
@@ -197,18 +202,24 @@ func (r *barRenderer) handle(ev payload.ProgressEvent) {
 			mpb.PrependDecorators(decor.Name(name, decor.WCSyncSpaceR)),
 			mpb.AppendDecorators(decor.Percentage()),
 		)
+		bar.SetTotal(int64(ev.TotalOps), false)
 		r.bars[ev.Partition] = bar
 	}
-	if delta := ev.CompletedOps - r.last[ev.Partition]; delta > 0 {
+	if ev.Phase != "" && ev.PhaseTotal > r.phaseTotal[ev.Partition] {
+		r.phaseTotal[ev.Partition] = ev.PhaseTotal
+		bar.SetTotal(int64(ev.TotalOps+ev.PhaseTotal), false)
+	}
+	done := ev.CompletedOps + ev.PhaseCompleted
+	if delta := done - r.last[ev.Partition]; delta > 0 {
 		bar.IncrBy(delta)
-		r.last[ev.Partition] = ev.CompletedOps
+		r.last[ev.Partition] = done
 	}
 	if ev.Err != nil {
 		bar.Abort(false)
 		return
 	}
 	if ev.Done {
-		bar.SetTotal(int64(ev.TotalOps), true)
+		bar.SetTotal(int64(ev.TotalOps+r.phaseTotal[ev.Partition]), true)
 	}
 }
 

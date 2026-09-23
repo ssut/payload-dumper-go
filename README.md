@@ -10,6 +10,7 @@ See how fast payload-dumper-go is: https://imgur.com/a/X6HKJT4. (MacBook Pro 16-
 
 - Incredibly fast decompression. All decompression progresses are executed in parallel.
 - Incremental OTA (delta) payload support. Applied on top of the base images (`-old`), bit-exact output.
+- Regenerates the dm-verity metadata delta payloads omit (hash tree and FEC parity). No `avbtool` or `fec` tooling needed.
 - Verifies everything: operation data, source images, and final images (sha256). Fails loudly with a non-zero exit code.
 - Support original zip package that contains payload.bin, read in place without a temp copy.
 - Usable as a Go library. (`github.com/ssut/payload-dumper-go/payload`)
@@ -80,6 +81,7 @@ Options:
   -q, -quiet             Quiet mode - suppress non-essential output
   -m, -machine-readable  Machine-readable output format
   -no-verify             Skip sha256 verification
+  -no-fec                Skip dm-verity FEC generation
 ```
 
 ### Incremental (delta) OTA
@@ -90,6 +92,14 @@ Extract the base (previous) full OTA first, then pass it via `-old`:
 payload-dumper-go -o base_images base_full_ota.zip
 payload-dumper-go -old base_images -o new_images incremental_ota.zip
 ```
+
+Delta payloads omit the dm-verity hash tree and FEC parity for partitions like `system`
+and `vendor`, expecting the device to compute them on install. Both are computed here,
+so the output is bit-exact.
+
+`-no-fec` skips FEC generation and final image verification for partitions that
+require FEC. These images must not be flashed; use this option only to inspect contents. Note that `-m` reports 100% when
+the operations finish, while FEC still runs; wait for the process to exit.
 
 ### Library usage
 
